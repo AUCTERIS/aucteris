@@ -3,3 +3,6 @@
 /aucteris-ui/target/
 **/*.tmp
 aucteris-data/
+
+/aucteris-core/Cargo.lock
+/aucteris-ui/Cargo.lock
