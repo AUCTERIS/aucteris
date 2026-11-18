@@ -1,8 +1,9 @@
 /target/
-/aucteris-core/target/
-/aucteris-ui/target/
+/crates/core/target/
+/apps/desktop/target/
+/apps/cli/target/
 **/*.tmp
 aucteris-data/
 
-/aucteris-core/Cargo.lock
-/aucteris-ui/Cargo.lock
+/crates/core/Cargo.lock
+/apps/desktop/Cargo.lock

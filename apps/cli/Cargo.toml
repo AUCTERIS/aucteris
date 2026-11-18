@@ -1,0 +1,19 @@
+[package]
+name = "aucteris-cli"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[[bin]]
+name = "aucteris"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+aucteris-core.workspace = true
+chrono.workspace = true
+ctrlc.workspace = true
+libc.workspace = true
+serde_yaml.workspace = true
+tokio.workspace = true
+tracing-subscriber.workspace = true

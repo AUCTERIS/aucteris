@@ -1,20 +1,27 @@
 # Aucteris
 
-Aucteris is a native GPUI desktop app backed by an embedded Rust agent engine. The UI and core live in one Cargo workspace; the desktop app calls the core directly, with no separate Aucteris API service.
+Aucteris is a local-first Rust workspace for creating and running agent bots through installed CLI harnesses. The GPUI desktop app and mission CLI both embed the same reusable execution engine; there is no separate Aucteris API service.
 
 ## Run
 
 ```bash
-cargo run -p aucteris-ui
+cargo run -p aucteris-desktop
 ```
 
-Create a bot with a name, role, working folder, instructions, and an installed CLI agent. The available agents are detected from `PATH`: Claude Code (`claude`), Codex (`codex`), OpenCode (`opencode`), and Gemini CLI (`gemini`). Enter a prompt in the bot chat to start a real run in that bot's folder. The core records the mission and streams normalized runtime events back to the chat. Stop terminates the active CLI process tree.
+Create a bot, select an installed CLI (`claude`, `codex`, `opencode`, or `gemini`), set its instructions and working folder, then send a prompt. The engine persists mission evidence separately from the bot's working folder and streams normalized events back to the desktop UI. Bot profiles and chat history are stored under `$XDG_DATA_HOME/aucteris`, or `~/.local/share/aucteris`.
 
-Bot profiles and chat history are stored locally under `$XDG_DATA_HOME/aucteris/desktop-state.json`, or `~/.local/share/aucteris/desktop-state.json` when `XDG_DATA_HOME` is not set. Core mission records use the same Aucteris data directory.
+The standalone mission CLI is available as `aucteris`:
 
-## Structure
+```bash
+cargo run -p aucteris-cli -- run crates/core/examples/mission-slice01.yaml
+```
 
-- `aucteris-ui/` — GPUI desktop shell, bot setup/editing, local persistence, and chat presentation.
-- `aucteris-core/` — embeddable mission engine, runtime adapters, execution lifecycle, and evidence store.
+Agent CLIs use their own local installation and authentication. Aucteris does not host a model API or require a separate backend service.
 
-To build the desktop app, Cargo needs the pinned GPUI fork dependencies and the core's protobuf build dependency. No Aucteris server or model API integration is required; each selected CLI uses its own local installation and authentication.
+## Workspace
+
+- `apps/desktop` — GPUI composition root, bot/chat application state, local persistence, and presentation.
+- `apps/cli` — command-line entry point for mission files, reports, and durable orchestrators.
+- `crates/core` — reusable mission engine, domain, runtime adapters, persistence, sandboxing, and orchestration.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for module responsibilities and dependency rules.

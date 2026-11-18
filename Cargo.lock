@@ -491,6 +491,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "aucteris-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aucteris-core",
+ "chrono",
+ "ctrlc",
+ "libc",
+ "serde_yaml",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "aucteris-core"
 version = "0.1.0"
 dependencies = [
@@ -516,7 +530,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "aucteris-ui"
+name = "aucteris-desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
