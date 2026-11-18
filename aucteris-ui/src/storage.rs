@@ -1,7 +1,6 @@
 //! Local UI persistence for bot profiles and plain chat history.
 
 use crate::model::{Author, Bot, Chat, MascotShape, Message, Part, Presence, Workspace};
-use gpui::SharedString;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 

@@ -241,7 +241,7 @@ impl Shell {
         chat.messages.push(Message {
             author: Author::You,
             bot: None,
-            parts: vec![Part::Text(prompt)],
+            parts: vec![Part::Text(prompt.clone())],
             time: "now".into(),
             streaming: false,
             stopped: false,
@@ -352,7 +352,7 @@ impl Shell {
         let bot_id = self.run_bot;
         match action {
             Action::Intent(activity) => {
-                self.status = Some(activity.into());
+                self.status = Some(activity.clone().into());
                 if let Some(bot) = bot_id.and_then(|id| self.workspace.bot_mut(id)) {
                     bot.activity = activity.into();
                 }
@@ -364,7 +364,7 @@ impl Shell {
                 }
             }
             Action::Tool { label, activity } => {
-                self.status = Some(activity.into());
+                self.status = Some(activity.clone().into());
                 if let Some(bot) = bot_id.and_then(|id| self.workspace.bot_mut(id)) {
                     bot.activity = activity.into();
                 }
@@ -385,7 +385,7 @@ impl Shell {
             }
             Action::Error(text) => {
                 if let Some(message) = self.workspace.chat_mut().messages.last_mut() {
-                    message.push_text(&format!("\n\n{ text }"));
+                    message.push_text(&format!("\n\n{text}"));
                 }
             }
             Action::Usage { input, output } => {

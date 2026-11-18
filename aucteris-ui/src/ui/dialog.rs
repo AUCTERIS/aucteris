@@ -9,7 +9,7 @@ use gpui::{
     Window, div, prelude::*, px,
 };
 
-use crate::model::{self, Bot, Chat, MascotShape, Message, Mode, Part, Presence};
+use crate::model::{Bot, Chat, MascotShape, Mode, Presence};
 use crate::theme::{Theme, metrics, text as typo};
 use crate::ui::shell::Shell;
 use crate::ui::widgets;
