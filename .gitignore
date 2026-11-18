@@ -1,0 +1,5 @@
+/target/
+/aucteris-core/target/
+/aucteris-ui/target/
+**/*.tmp
+aucteris-data/

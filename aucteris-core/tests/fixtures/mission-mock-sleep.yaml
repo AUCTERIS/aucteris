@@ -1,0 +1,15 @@
+# Recovery drill fixture: the attempt sleeps 20s inside the sandbox,
+# giving the test time to kill the engine mid-flight. On restart the
+# activity is retried; the orphaned attempt must be reconciled to
+# unknown before the new attempt writes out.txt.
+objective: Create out.txt after a simulated long-running attempt.
+constraints:
+  - Work inside the mission workspace.
+tasks:
+  - id: slow-write
+    title: Slow write of out.txt
+    prompt: >-
+      mock:sleep=20 mock:write=out.txt
+      Simulate a long-running agent, then write out.txt.
+    verify_cmd: test -s out.txt
+    runtime: mock

@@ -1,0 +1,13 @@
+# Deterministic pipeline test — no provider credentials needed.
+# The mock runtime writes out.txt via its mock:write directive.
+objective: Create out.txt containing the mock output.
+constraints:
+  - Work inside the mission workspace.
+tasks:
+  - id: write
+    title: Write out.txt
+    prompt: >-
+      mock:write=out.txt
+      Create out.txt in the workspace.
+    verify_cmd: grep -q "mock output" out.txt
+    runtime: mock

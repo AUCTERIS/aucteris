@@ -1,0 +1,13 @@
+# Approval-gate fixture: workflow must park on the awakeable until
+# `aucteris approve` resolves it.
+objective: Approval gate test with the mock runtime.
+constraints:
+  - Work inside the mission workspace.
+tasks:
+  - id: gated
+    title: Gated write of ok.txt
+    prompt: >-
+      mock:write=ok.txt
+      Write ok.txt once approved.
+    verify_cmd: test -f ok.txt
+    runtime: mock

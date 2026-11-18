@@ -1,0 +1,36 @@
+# Slice-01 demo mission: small Python utility + independent review.
+# Task A implements; Task B reviews the produced files.
+# verify_cmd runs OUTSIDE the agent — that is the point.
+
+objective: >-
+  Create a small Python module `textstats.py` with a function
+  `word_count(text)` returning a dict of word frequencies, plus a pytest
+  test file that validates it.
+
+constraints:
+  - Only Python stdlib; no external packages.
+  - All work inside the mission workspace.
+
+tasks:
+  - id: impl
+    title: Implement textstats + tests
+    prompt: >-
+      Create textstats.py implementing word_count(text) -> dict mapping each
+      lowercase word to its count (ignore punctuation, split on whitespace).
+      Also create test_textstats.py with pytest tests covering: empty string,
+      repeated words, punctuation, and case-insensitivity. Make sure
+      `python3 -m pytest -q` passes.
+    verify_cmd: python3 -m pytest -q
+    runtime: codex
+
+  - id: review
+    title: Review implementation against acceptance criteria
+    depends_on: [impl]
+    prompt: >-
+      Review textstats.py and test_textstats.py in this directory. Check:
+      correctness of word_count edge cases, test coverage quality, and code
+      clarity. Write your findings to REVIEW.md (what is correct, what is
+      missing or wrong, with file/line references). Do NOT modify the
+      implementation files.
+    verify_cmd: test -s REVIEW.md
+    runtime: codex
