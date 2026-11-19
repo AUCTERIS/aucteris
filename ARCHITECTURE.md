@@ -27,6 +27,7 @@ crates/
 - **Domain** owns mission/task state in the engine and bot/chat state in the desktop app. Domain modules do not depend on GPUI or process I/O.
 - **Application** coordinates mission execution, verification, status transitions, and reporting. `application/ports/runtime.rs` defines the harness contract. The desktop application adapter translates bot settings and prompts into core missions and maps execution events into UI events.
 - **Runtime adapters** translate the stable `RuntimeAdapter` contract into each CLI's arguments, output events, and declared capabilities. The engine controls registration and mission lifecycle.
+- **Agent sessions** (`apps/desktop/src/application/session.rs`) drive the desktop chats through `komet-harness`: one persistent, resumable session per chat, steered and interrupted per chat. Approvals and agent questions are bridged back into the transcript as cards, and each bot's sandbox level rides the run request. CLIs without a harness (Gemini) still run through the core mission path.
 - **Infrastructure** owns JSON mission persistence, process supervision/cancellation, sandbox setup, and egress proxying.
 - **Presentation** renders state and forwards user actions. It does not spawn agents or write core mission records directly.
 - **Composition roots** (`apps/desktop/src/main.rs` and `apps/cli/src/main.rs`) construct the application and select the engine's built-in runtime registry.

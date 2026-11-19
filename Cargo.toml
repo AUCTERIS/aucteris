@@ -18,6 +18,10 @@ futures = "0.3"
 futures-util = "0.3.34"
 gpui = { git = "https://github.com/jomvick/zed", rev = "e2ddcc6805f8c5088e62a60dfe517abcccd61a9a" }
 gpui_platform = { git = "https://github.com/jomvick/zed", rev = "e2ddcc6805f8c5088e62a60dfe517abcccd61a9a", features = ["wayland", "x11", "font-kit", "runtime_shaders"] }
+# Agent harness layer, pinned to a komet release: drives each CLI's native
+# wire (Claude stream-json, Codex app-server, ACP for opencode/devin/grok).
+komet-harness = { git = "https://github.com/jomvick/komet.git", rev = "5f7320d246e515c4d43af8a832c0b5a978749e4f" }
+komet-proto = { git = "https://github.com/jomvick/komet.git", rev = "5f7320d246e515c4d43af8a832c0b5a978749e4f" }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 libc = "0.2"
 reqwest = "0.13"
@@ -25,8 +29,8 @@ restate-sdk = { version = "0.12", features = ["reqwest-client"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
-tokio = { version = "1", features = ["rt-multi-thread"] }
-temporalio-client = "1.2.0"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "process", "macros"] }
+temporalio-client = { version = "1.2.0", features = ["vendored-protox"] }
 temporalio-common = "1.2.0"
 temporalio-macros = "1.2.0"
 temporalio-sdk = "1.2.0"

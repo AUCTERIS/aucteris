@@ -2,6 +2,7 @@
 
 mod claude;
 mod codex;
+mod devin;
 mod gemini;
 mod mock;
 mod opencode;
@@ -17,5 +18,6 @@ pub fn register_builtins(registry: &mut RuntimeRegistry) {
     registry.register(codex::CodexAdapter);
     registry.register(opencode::OpenCodeAdapter);
     registry.register(gemini::GeminiAdapter);
+    registry.register(devin::DevinAdapter);
     registry.register(mock::MockAdapter);
 }

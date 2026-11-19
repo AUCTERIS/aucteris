@@ -4,6 +4,25 @@
 //! [`Workspace`] is the UI's persisted view of the integrated local engine.
 
 use gpui::SharedString;
+use komet_proto::SandboxLevel;
+
+/// How a sandbox level reads in a row or a status strip.
+pub fn sandbox_label(level: SandboxLevel) -> &'static str {
+    match level {
+        SandboxLevel::ReadOnly => "Read-only",
+        SandboxLevel::WorkspaceWrite => "Workspace write",
+        SandboxLevel::DangerFullAccess => "Full access",
+    }
+}
+
+/// Next sandbox level in the cycle a click walks through.
+pub fn next_sandbox(level: SandboxLevel) -> SandboxLevel {
+    match level {
+        SandboxLevel::ReadOnly => SandboxLevel::WorkspaceWrite,
+        SandboxLevel::WorkspaceWrite => SandboxLevel::DangerFullAccess,
+        SandboxLevel::DangerFullAccess => SandboxLevel::ReadOnly,
+    }
+}
 
 /// Where a bot is right now. Three states, one mark on the row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,6 +199,8 @@ pub struct Bot {
     pub folder: SharedString,
     pub instructions: SharedString,
     pub tokens: u64,
+    /// OS-level confinement this bot runs under. Asked at send time.
+    pub sandbox: SandboxLevel,
 }
 
 /// One piece of a message. A reply is a sequence of these, so tool work reads
@@ -219,6 +240,24 @@ pub enum Part {
         kicker: String,
         title: String,
         detail: String,
+        /// Pending permission request this card answers, if any.
+        request: Option<u64>,
+        /// One button per choice: label, and whether it allows the action.
+        choices: Vec<(String, bool)>,
+        resolved: Option<String>,
+    },
+    /// A question the agent asked and is blocked on. One card per question.
+    Question {
+        request: u64,
+        index: usize,
+        header: String,
+        question: String,
+        options: Vec<String>,
+        multi_select: bool,
+        allow_free_text: bool,
+        /// The answer must not be shown back in the transcript.
+        secret: bool,
+        selected: Vec<String>,
         resolved: Option<String>,
     },
 }
@@ -290,6 +329,18 @@ impl Message {
                         out.push_str(resolved);
                     }
                 }
+                Part::Question {
+                    question, resolved, ..
+                } => {
+                    if !out.is_empty() {
+                        out.push(' ');
+                    }
+                    out.push_str(question);
+                    if let Some(resolved) = resolved {
+                        out.push(' ');
+                        out.push_str(resolved);
+                    }
+                }
             }
         }
         out
@@ -300,6 +351,18 @@ impl Message {
             text.push_str(chunk);
         } else {
             self.parts.push(Part::Text(chunk.to_string()));
+        }
+    }
+
+    /// Append reasoning to the open thought block, or start one.
+    pub fn push_thought(&mut self, chunk: &str) {
+        if let Some(Part::Thought { text, .. }) = self.parts.last_mut() {
+            text.push_str(chunk);
+        } else {
+            self.parts.push(Part::Thought {
+                text: chunk.to_string(),
+                collapsed: true,
+            });
         }
     }
 
@@ -336,6 +399,8 @@ pub struct Chat {
     /// The one line the sidebar shows under the title.
     pub preview: SharedString,
     pub time: SharedString,
+    /// Harness-native session id, resumed by the next prompt in this chat.
+    pub session_id: Option<String>,
 }
 
 impl Chat {
