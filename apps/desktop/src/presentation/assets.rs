@@ -117,6 +117,13 @@ icon_table!(
     "sliders",
     "users",
     "mascot",
+    "anthropic-mark",
+    "claude-mark",
+    "openai-mark",
+    "opencode-mark",
+    "gemini-mark",
+    "devin-mark",
+    "star",
 );
 
 macro_rules! mascot_table {

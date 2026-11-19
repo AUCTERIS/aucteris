@@ -67,9 +67,12 @@ pub struct Theme {
     pub panel: Hsla,
     /// A card resting in the page (bot panel sections).
     pub card: Hsla,
-    /// Selected sidebar row, user bubble plate.
+    /// Selected sidebar row.
     pub raised: Hsla,
     pub raised_hover: Hsla,
+    /// The person's message plate, and the ink that reads on it.
+    pub user_plate: Hsla,
+    pub on_user_plate: Hsla,
     /// Recessed field (search).
     pub inset: Hsla,
     /// A small control plate (chips, icon buttons).
@@ -132,6 +135,8 @@ impl Theme {
             card: hsla(0.0, 0.0, 0.145, 1.0),
             raised: hsla(0.0, 0.0, 0.157, 1.0),
             raised_hover: hsla(0.0, 0.0, 0.18, 1.0),
+            user_plate: hsla(0.0, 0.0, 0.92, 1.0),
+            on_user_plate: hsla(0.0, 0.0, 0.12, 1.0),
             inset: hsla(0.0, 0.0, 0.095, 1.0),
             control: hsla(0.0, 0.0, 0.16, 1.0),
             menu: hsla(0.0, 0.0, 0.15, 1.0),
@@ -170,6 +175,8 @@ impl Theme {
             card: hsla(0.0, 0.0, 1.0, 1.0),
             raised: hsla(0.12, 0.05, 0.895, 1.0),
             raised_hover: hsla(0.12, 0.05, 0.86, 1.0),
+            user_plate: hsla(0.12, 0.05, 0.895, 1.0),
+            on_user_plate: ink,
             inset: hsla(0.12, 0.06, 0.945, 1.0),
             control: hsla(0.12, 0.05, 0.93, 1.0),
             menu: hsla(0.0, 0.0, 1.0, 1.0),
@@ -249,7 +256,8 @@ fn identity_palette(dark: bool) -> [Hsla; 8] {
     ]
 }
 
-/// Layout numbers. Spacing is a 4px grid, control heights are 24/28/32/36.
+/// Layout numbers. Spacing is a 4px grid (with a 2px half-step for hairlines),
+/// control heights are 20/24/28/30/32.
 pub mod metrics {
     pub const SIDEBAR_WIDTH: f32 = 256.0;
     pub const PANEL_WIDTH: f32 = 332.0;
@@ -259,6 +267,8 @@ pub mod metrics {
     pub const STATUS_HEIGHT: f32 = 26.0;
 
     pub const SPACE_1: f32 = 4.0;
+    /// Half a step: stacked lines inside one chip or card.
+    pub const SPACE_HALF: f32 = 2.0;
     pub const SPACE_2: f32 = 8.0;
     pub const SPACE_3: f32 = 12.0;
     pub const SPACE_4: f32 = 16.0;
@@ -266,16 +276,27 @@ pub mod metrics {
 
     pub const RADIUS_MENU_ROW: f32 = 6.0;
     pub const RADIUS_CONTROL: f32 = 6.0;
-    pub const RADIUS_CARD: f32 = 10.0;
+    pub const RADIUS_CARD: f32 = 12.0;
     pub const RADIUS_DIALOG: f32 = 14.0;
     pub const RADIUS_BUBBLE: f32 = 18.0;
-    pub const RADIUS_COMPOSER: f32 = 22.0;
+    pub const RADIUS_COMPOSER: f32 = 26.0;
 
     pub const CONTROL_SM: f32 = 24.0;
     pub const CONTROL_MD: f32 = 28.0;
     /// Form fields, which need room for a caret and a value.
     pub const CONTROL_LG: f32 = 32.0;
+    /// A tag on a row: undo, counters.
+    pub const CONTROL_XS: f32 = 20.0;
     pub const MENU_ROW: f32 = 30.0;
+
+    /// Widest a person's message plate can get.
+    pub const BUBBLE_MAX_WIDTH: f32 = 560.0;
+    /// The agent's cards: approval, question.
+    pub const CARD_WIDTH: f32 = 422.0;
+    /// Inset inside a card.
+    pub const CARD_INSET: f32 = 16.0;
+    /// A centered block of prose on the empty state.
+    pub const PROSE_WIDTH: f32 = 440.0;
 
     /// One inset per surface: everything starts on this left edge.
     pub const GUTTER: f32 = 12.0;

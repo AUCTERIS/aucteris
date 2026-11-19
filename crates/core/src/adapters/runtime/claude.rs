@@ -54,7 +54,7 @@ fn parse_line(line: &str) -> Vec<RuntimeEvent> {
         Some("system") if v.get("subtype").and_then(|s| s.as_str()) == Some("init") => {
             vec![RuntimeEvent::SessionStarted {
                 model: v
-                    .pointer("model")
+                    .pointer("/model")
                     .and_then(|m| m.as_str())
                     .map(String::from),
             }]

@@ -4,7 +4,8 @@
 //! you" summaries above the list — a bot's state belongs on its own row.
 
 use gpui::{
-    AnyElement, Context, FontWeight, IntoElement, ParentElement, Styled, div, prelude::*, px,
+    AnyElement, Context, FontWeight, IntoElement, ParentElement, Styled, Window, div, prelude::*,
+    px,
 };
 
 use crate::domain::model::Presence;
@@ -70,7 +71,7 @@ impl Shell {
             )
             .child(
                 div()
-                    .id("sidebar-new-bot-button")
+                    .id("sidebar-create-button")
                     .size(px(metrics::CONTROL_LG))
                     .rounded_full()
                     .flex()
@@ -79,10 +80,134 @@ impl Shell {
                     .cursor_pointer()
                     .bg(theme.control)
                     .hover(|style| style.bg(theme.raised_hover))
-                    .on_click(cx.listener(|this, _event, window, cx| this.open_new_bot(window, cx)))
+                    .on_click(cx.listener(|this, _event, _window, cx| {
+                        this.create_menu_open = !this.create_menu_open;
+                        cx.notify();
+                    }))
                     .child(widgets::icon("plus", 19.0, theme.ink)),
             )
             .into_any_element()
+    }
+
+    /// One row of the "+" menu: glyph, name, one-line detail.
+    fn menu_entry<F>(
+        &self,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+        id: (&'static str, usize),
+        glyph: &'static str,
+        label: &'static str,
+        detail: &'static str,
+        on_click: F,
+    ) -> AnyElement
+    where
+        F: Fn(&mut Shell, &mut Window, &mut Context<Shell>) + 'static,
+    {
+        let hover = theme.hover_wash();
+        div()
+            .id(id)
+            .h(px(44.0))
+            .px(px(metrics::SPACE_3))
+            .flex()
+            .items_center()
+            .gap(px(metrics::SPACE_3))
+            .rounded(px(metrics::RADIUS_CONTROL))
+            .cursor_pointer()
+            .hover(move |style| style.bg(hover))
+            .on_click(cx.listener(move |this, _event, window, cx| on_click(this, window, cx)))
+            .child(widgets::icon(glyph, 16.0, theme.ink_secondary))
+            .child(
+                div()
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .gap(px(1.0))
+                    .child(
+                        div()
+                            .text_size(px(typo::BODY))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.ink)
+                            .child(label),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(typo::TINY))
+                            .text_color(theme.ink_tertiary)
+                            .child(detail),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// The "+" menu hanging under the header button: New bot, New team.
+    /// Rendered at window level so its backdrop can catch clicks anywhere.
+    pub(crate) fn view_create_menu(
+        &self,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !self.create_menu_open {
+            return None;
+        }
+        Some(
+            div()
+                .id("create-menu-layer")
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .child(
+                    div()
+                        .id("create-menu-backdrop")
+                        .absolute()
+                        .inset_0()
+                        .on_click(cx.listener(|this, _event, _window, cx| {
+                            this.create_menu_open = false;
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        // Under the header's "+" button: the sidebar sits 8px
+                        // from the left edge and is 256 wide; the menu is 200.
+                        .top(px(metrics::SPACE_2
+                            + metrics::HEADER_HEIGHT
+                            + metrics::SPACE_2))
+                        .left(px(metrics::SPACE_2 + metrics::SIDEBAR_WIDTH
+                            - metrics::SPACE_2
+                            - 200.0))
+                        .w(px(200.0))
+                        .flex()
+                        .flex_col()
+                        .gap(px(metrics::SPACE_HALF))
+                        .p(px(metrics::SPACE_HALF))
+                        .rounded(px(metrics::RADIUS_CONTROL))
+                        .bg(theme.menu)
+                        .border_1()
+                        .border_color(theme.edge)
+                        .shadow_md()
+                        .child(self.menu_entry(
+                            theme,
+                            cx,
+                            ("create-menu-bot", 0),
+                            "bot",
+                            "New bot",
+                            "A single agent with its own chat",
+                            |this, window, cx| this.open_new_bot(window, cx),
+                        ))
+                        .child(self.menu_entry(
+                            theme,
+                            cx,
+                            ("create-menu-team", 1),
+                            "users",
+                            "New team",
+                            "Several bots sharing one chat",
+                            |this, window, cx| this.open_new_team(window, cx),
+                        )),
+                )
+                .into_any_element(),
+        )
     }
 
     fn sidebar_home(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
@@ -147,23 +272,7 @@ impl Shell {
             .px(px(metrics::GUTTER))
             .pt(px(metrics::SPACE_3))
             .pb(px(metrics::SPACE_1))
-            .flex()
-            .items_center()
-            .justify_between()
-            .child(widgets::section_label("Rooms", theme))
-            .child(
-                div()
-                    .id("create-room")
-                    .size(px(metrics::CONTROL_SM))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(metrics::RADIUS_CONTROL))
-                    .cursor_pointer()
-                    .hover(|style| style.bg(theme.raised_hover))
-                    .on_click(cx.listener(|this, _event, _window, cx| this.create_room(cx)))
-                    .child(widgets::icon("plus", 14.0, theme.ink_secondary)),
-            );
+            .child(widgets::section_label("Rooms", theme));
 
         div()
             .id("sidebar-home")
@@ -304,23 +413,7 @@ impl Shell {
                     .px(px(metrics::GUTTER))
                     .pt(px(metrics::SPACE_3))
                     .pb(px(metrics::SPACE_1))
-                    .flex()
-                    .items_center()
-                    .justify_between()
                     .child(widgets::section_label("Rooms", theme))
-                    .child(
-                        div()
-                            .id("search-create-room")
-                            .size(px(metrics::CONTROL_SM))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(metrics::RADIUS_CONTROL))
-                            .cursor_pointer()
-                            .hover(|style| style.bg(theme.raised_hover))
-                            .on_click(cx.listener(|this, _event, _window, cx| this.create_room(cx)))
-                            .child(widgets::icon("plus", 14.0, theme.ink_secondary)),
-                    )
                     .into_any_element(),
             );
             for index in room_indices {

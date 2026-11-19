@@ -1,6 +1,7 @@
 //! Local UI persistence for bot profiles and plain chat history.
 
 use crate::domain::model::{Author, Bot, Chat, MascotShape, Message, Part, Presence, Workspace};
+use komet_proto::SandboxLevel;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -23,6 +24,14 @@ struct PersistedBot {
     folder: String,
     instructions: String,
     tokens: u64,
+    /// Absent in files written before sandbox levels existed: those bots ran
+    /// with everything allowed, so that is what they keep.
+    #[serde(default = "full_access")]
+    sandbox: SandboxLevel,
+}
+
+fn full_access() -> SandboxLevel {
+    SandboxLevel::DangerFullAccess
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -34,6 +43,8 @@ struct PersistedChat {
     messages: Vec<PersistedMessage>,
     preview: String,
     time: String,
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -117,6 +128,7 @@ impl From<PersistedWorkspace> for Workspace {
                 folder: bot.folder.into(),
                 instructions: bot.instructions.into(),
                 tokens: bot.tokens,
+                sandbox: bot.sandbox,
             })
             .collect();
         let chats = value.chats.into_iter().map(Chat::from).collect::<Vec<_>>();
@@ -143,6 +155,7 @@ impl From<&Bot> for PersistedBot {
             folder: bot.folder.to_string(),
             instructions: bot.instructions.to_string(),
             tokens: bot.tokens,
+            sandbox: bot.sandbox,
         }
     }
 }
@@ -157,6 +170,7 @@ impl From<&Chat> for PersistedChat {
             messages: chat.messages.iter().map(PersistedMessage::from).collect(),
             preview: chat.preview.to_string(),
             time: chat.time.to_string(),
+            session_id: chat.session_id.clone(),
         }
     }
 }
@@ -171,6 +185,7 @@ impl From<PersistedChat> for Chat {
             messages: chat.messages.into_iter().map(Message::from).collect(),
             preview: chat.preview.into(),
             time: chat.time.into(),
+            session_id: chat.session_id,
         }
     }
 }
@@ -195,6 +210,7 @@ impl From<&Message> for PersistedMessage {
                     Part::Files { path, .. } => Some(path.as_str()),
                     Part::Note { text, .. } => Some(text.as_str()),
                     Part::Approval { title, .. } => Some(title.as_str()),
+                    Part::Question { question, .. } => Some(question.as_str()),
                 })
                 .collect::<Vec<_>>()
                 .join("\n"),

@@ -8,7 +8,8 @@ use gpui::{
     AnyElement, Context, FontWeight, IntoElement, ParentElement, Styled, div, prelude::*, px,
 };
 
-use crate::presentation::theme::{Appearance, Theme, metrics, text as typo};
+use crate::presentation::theme::{Theme, metrics, text as typo};
+use crate::presentation::ui::dialog::PickerHost;
 use crate::presentation::ui::shell::Shell;
 use crate::presentation::ui::widgets::{self, compact_count};
 
@@ -80,16 +81,71 @@ impl Shell {
                     ),
             );
 
-        // Answers with
-        let runtime_row = self.panel_row(
-            theme,
-            cx,
-            "agent-cli-row",
-            "Agent CLI",
-            crate::application::engine::Engine::runtime_label(&bot.runtime),
-            true,
-            move |this, cx| this.cycle_runtime(bot_id, cx),
-        );
+        // Answers with — a chip that opens the same provider/model picker
+        // the bot form uses, writing the choice to the bot immediately.
+        let runtime_name = self.engine.runtime_label(&bot.runtime);
+        let runtime_icon = crate::application::engine::Engine::runtime_icon(&bot.runtime);
+        let picker_open = self.panel_picker.open;
+        let chip_hover = theme.hover_wash();
+        let runtime_chip = div()
+            .id("panel-runtime-chip")
+            .h(px(metrics::CONTROL_LG))
+            .px(px(10.0))
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(8.0))
+            .rounded(px(metrics::RADIUS_CONTROL))
+            .bg(theme.inset)
+            .border_1()
+            .border_color(if picker_open {
+                theme.edge
+            } else {
+                theme.hairline
+            })
+            .cursor_pointer()
+            .hover(move |style| style.bg(chip_hover))
+            .on_click(cx.listener(|this, _event, window, cx| {
+                this.panel_picker.open = !this.panel_picker.open;
+                if this.panel_picker.open {
+                    window.focus(&this.panel_picker_focus.clone(), cx);
+                } else {
+                    window.focus(&this.focus.clone(), cx);
+                }
+                cx.notify();
+            }))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .min_w_0()
+                    .child(widgets::icon(runtime_icon, 16.0, theme.ink))
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(typo::BODY))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.ink)
+                            .child(runtime_name),
+                    ),
+            )
+            .child(widgets::icon(
+                if picker_open { "x" } else { "chevron-down" },
+                12.0,
+                theme.ink_tertiary,
+            ))
+            .into_any_element();
+
+        let picker_popup = picker_open.then(|| {
+            self.provider_picker_view(
+                theme,
+                cx,
+                &self.panel_picker,
+                &bot.runtime,
+                PickerHost::Panel,
+            )
+        });
 
         let folder_row = div()
             .flex()
@@ -112,6 +168,16 @@ impl Shell {
                     .text_color(theme.ink_tertiary)
                     .child(bot.folder.to_string()),
             );
+
+        let sandbox_row = self.panel_row(
+            theme,
+            cx,
+            "sandbox-row",
+            "Sandbox",
+            crate::domain::model::sandbox_label(bot.sandbox).to_string(),
+            true,
+            move |this, cx| this.cycle_sandbox(bot_id, cx),
+        );
 
         let instructions = div()
             .p(px(metrics::SPACE_3))
@@ -158,12 +224,6 @@ impl Shell {
             )
             .child(widgets::meter(usage_fraction, theme));
 
-        let skin_row = div()
-            .flex()
-            .gap(px(metrics::SPACE_1))
-            .child(self.skin_button(theme, cx, Appearance::Dark))
-            .child(self.skin_button(theme, cx, Appearance::Light));
-
         div()
             .w(px(metrics::PANEL_WIDTH))
             .h_full()
@@ -189,7 +249,8 @@ impl Shell {
                             .flex_col()
                             .gap(px(metrics::SPACE_1))
                             .child(widgets::section_label("Agent CLI", theme))
-                            .child(runtime_row),
+                            .child(runtime_chip)
+                            .when_some(picker_popup, |this, popup| this.child(popup)),
                     )
                     .child(
                         div()
@@ -198,6 +259,14 @@ impl Shell {
                             .gap(px(metrics::SPACE_1))
                             .child(widgets::section_label("Working folder", theme))
                             .child(folder_row),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(metrics::SPACE_1))
+                            .child(widgets::section_label("Sandbox", theme))
+                            .child(sandbox_row),
                     )
                     .child(
                         div()
@@ -217,15 +286,7 @@ impl Shell {
                                 .child(widgets::section_label("Usage", theme))
                                 .child(usage),
                         )
-                    })
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(metrics::SPACE_2))
-                            .child(widgets::section_label("Skin", theme))
-                            .child(skin_row),
-                    ),
+                    }),
             )
             .into_any_element()
     }
@@ -388,51 +449,6 @@ impl Shell {
                             .child("Everyone in a team shares one chat. Add or remove bots as the work changes."),
                     ),
             )
-            .into_any_element()
-    }
-
-    fn skin_button(
-        &self,
-        theme: &Theme,
-        cx: &mut Context<Self>,
-        appearance: Appearance,
-    ) -> AnyElement {
-        let selected = self.appearance == appearance;
-        let hover = theme.hover_wash();
-        div()
-            .id(("skin", if appearance.is_dark() { 0usize } else { 1usize }))
-            .h(px(metrics::CONTROL_MD))
-            .px(px(metrics::SPACE_3))
-            .flex()
-            .items_center()
-            .gap(px(5.0))
-            .rounded_full()
-            .border_1()
-            .border_color(if selected { theme.edge } else { theme.hairline })
-            .when(selected, |this| this.bg(theme.ink.opacity(0.06)))
-            .cursor_pointer()
-            .hover(move |style| style.bg(hover))
-            .text_size(px(typo::TINY))
-            .text_color(if selected {
-                theme.ink
-            } else {
-                theme.ink_tertiary
-            })
-            .on_click(cx.listener(move |this, _event, _window, cx| {
-                if this.appearance != appearance {
-                    this.toggle_appearance(cx);
-                }
-            }))
-            .child(widgets::icon(
-                if appearance.is_dark() { "moon" } else { "sun" },
-                11.0,
-                if selected {
-                    theme.ink
-                } else {
-                    theme.ink_tertiary
-                },
-            ))
-            .child(appearance.label())
             .into_any_element()
     }
 

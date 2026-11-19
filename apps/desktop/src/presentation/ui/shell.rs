@@ -14,8 +14,10 @@ use crate::application::engine::{self, Action, EngineEvent};
 use crate::domain::model::{self, Author, Message, Part, Presence, Settings, Workspace};
 use crate::infrastructure::storage::AppStorage;
 use crate::presentation::theme::{Appearance, Theme, metrics, text as typo};
-use crate::presentation::ui::dialog::Dialog;
+use crate::presentation::ui::dialog::{Dialog, ProviderPicker};
+use komet_proto::{PermissionChoice, PermissionKind, Scope};
 use std::sync::Arc;
+use std::time::Duration;
 
 pub struct Shell {
     pub(crate) workspace: Workspace,
@@ -40,14 +42,26 @@ pub struct Shell {
     pub(crate) settings: Settings,
     /// The open dialog, if any. Only one can be open at a time.
     pub(crate) dialog: Option<Dialog>,
+    /// The bot panel's provider/model picker — same widget as the bot
+    /// form's dropdown, with its own search/rail/scroll state.
+    pub(crate) panel_picker: ProviderPicker,
+    pub(crate) panel_picker_focus: FocusHandle,
+    /// Blink phase of the dialog form caret; any keystroke forces it on.
+    pub(crate) caret_visible: bool,
+    /// The sidebar's "+" menu: New bot / New team.
+    pub(crate) create_menu_open: bool,
 
     /// Bumped to abandon a run in flight. The loop compares it after every
     /// sleep, so Stop needs no cancellation plumbing.
     generation: u64,
     saw_assistant_text: bool,
     pub(crate) run_bot: Option<u32>,
+    /// Chat whose run is in flight. Runs are per chat, not global.
+    pub(crate) run_chat: Option<u32>,
     /// The line the status strip shows while a run is live.
     pub(crate) status: Option<SharedString>,
+    /// Question waiting for a typed answer from the composer.
+    pub(crate) free_text_question: Option<(u64, usize)>,
     focus_pending: bool,
 }
 
@@ -60,6 +74,34 @@ impl Shell {
         let storage = AppStorage::new(engine.data_dir());
         let workspace = storage.load();
         let available_runtimes = engine.available_runtimes().to_vec();
+        // Ask each installed CLI which models it accepts, off the UI thread.
+        // Until they answer, the picker shows the built-in catalog.
+        let engine_for_models = Arc::clone(&engine);
+        cx.spawn(async move |this, cx| {
+            let discovered = cx
+                .background_executor()
+                .spawn(async move { engine_for_models.discover_models() })
+                .await;
+            if discovered > 0 {
+                let _ = this.update(cx, |_, cx| cx.notify());
+            }
+        })
+        .detach();
+        // Caret blink: dialog fields and the composer share one phase, so
+        // the loop runs for the shell's lifetime — two notifications a
+        // second is cheaper than tracking which surface holds the caret.
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(530))
+                    .await;
+                let _ = this.update(cx, |shell, cx| {
+                    shell.caret_visible = !shell.caret_visible;
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
         Self {
             workspace,
             engine,
@@ -76,10 +118,16 @@ impl Shell {
             scroll: ScrollHandle::new(),
             settings: Settings::default(),
             dialog: None,
+            panel_picker: ProviderPicker::default(),
+            panel_picker_focus: cx.focus_handle(),
+            caret_visible: true,
+            create_menu_open: false,
             generation: 0,
             saw_assistant_text: false,
             run_bot: None,
+            run_chat: None,
             status: None,
+            free_text_question: None,
             focus_pending: true,
         }
     }
@@ -90,21 +138,8 @@ impl Shell {
         }
     }
 
-    pub(crate) fn create_room(&mut self, cx: &mut Context<Self>) {
-        if self.running() {
-            return;
-        }
-        let room_count = self
-            .workspace
-            .chats
-            .iter()
-            .filter(|chat| chat.is_room())
-            .count();
-        let title = if room_count == 0 {
-            "New team".to_string()
-        } else {
-            format!("New team {}", room_count + 1)
-        };
+    /// Register a finished team: title and members chosen in the dialog.
+    pub(crate) fn create_team(&mut self, title: String, members: Vec<u32>, cx: &mut Context<Self>) {
         let id = self
             .workspace
             .chats
@@ -115,12 +150,17 @@ impl Shell {
             + 1;
         self.workspace.chats.push(model::Chat {
             id,
-            title: title.clone().into(),
+            title: title.into(),
             bot: None,
-            members: Vec::new(),
+            members: members.clone(),
             messages: Vec::new(),
-            preview: "Add bots to start this team".into(),
+            preview: if members.is_empty() {
+                "Add bots to start this team".into()
+            } else {
+                format!("{} bots in this team", members.len()).into()
+            },
             time: "now".into(),
+            session_id: None,
         });
         self.workspace.selected = self.workspace.chats.len() - 1;
         self.panel_open = true;
@@ -174,6 +214,20 @@ impl Shell {
         self.status.is_some() && self.run_bot.is_some()
     }
 
+    /// Whether the composer's Send can steer the run in flight.
+    pub(crate) fn can_steer(&self) -> bool {
+        self.run_chat
+            .filter(|chat| {
+                self.workspace
+                    .chats
+                    .get(self.workspace.selected)
+                    .map(|c| c.id)
+                    == Some(*chat)
+            })
+            .map(|chat| self.engine.can_steer(chat))
+            .unwrap_or(false)
+    }
+
     // ---- selection -------------------------------------------------------
 
     pub(crate) fn select_chat(&mut self, index: usize, cx: &mut Context<Self>) {
@@ -183,6 +237,7 @@ impl Shell {
         self.workspace.select(index);
         self.searching = false;
         self.search.clear();
+        self.panel_picker.open = false;
         self.scroll.scroll_to_bottom();
         cx.notify();
     }
@@ -199,14 +254,54 @@ impl Shell {
 
     /// Send the composer's contents to whoever should answer.
     pub(crate) fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.running() {
-            return;
-        }
         let prompt = self.draft.trim().to_string();
         if prompt.is_empty() {
             return;
         }
+        // A question offering free text takes the next line typed here.
+        if let Some((request, index)) = self.free_text_question.take() {
+            self.draft.clear();
+            self.engine
+                .answer_question(request, index, Vec::new(), Some(prompt.clone()));
+            self.mark_question(request, index, prompt);
+            cx.notify();
+            return;
+        }
+        // A live run that supports steering takes the prompt as an injection
+        // into the same turn instead of starting a new one.
+        if self.running() {
+            let chat_id = self.workspace.chat().id;
+            if self.run_chat == Some(chat_id) && self.engine.can_steer(chat_id) {
+                if self.engine.steer(chat_id, prompt.clone()) {
+                    self.draft.clear();
+                    self.workspace.chat_mut().messages.push(Message {
+                        author: Author::You,
+                        bot: None,
+                        parts: vec![Part::Text(prompt)],
+                        time: "now".into(),
+                        streaming: false,
+                        stopped: false,
+                    });
+                    self.workspace.replace_last_preview();
+                    cx.notify();
+                }
+            }
+            return;
+        }
         let Some(bot_id) = self.workspace.responder() else {
+            self.workspace.chat_mut().messages.push(Message {
+                author: Author::System,
+                bot: None,
+                parts: vec![Part::Text(
+                    "No bot in this room can answer — add one first.".to_string(),
+                )],
+                time: "now".into(),
+                streaming: false,
+                stopped: false,
+            });
+            self.workspace.replace_last_preview();
+            self.persist_workspace();
+            cx.notify();
             return;
         };
         let Some(bot) = self.workspace.bot(bot_id) else {
@@ -218,20 +313,24 @@ impl Shell {
             runtime: bot.runtime.to_string(),
             folder: bot.folder.to_string(),
             instructions: bot.instructions.to_string(),
+            resume: self.workspace.chat().session_id.clone(),
+            sandbox: bot.sandbox,
         };
         let bot_id = bot.id;
-        if !self
-            .available_runtimes
-            .iter()
-            .any(|cli| cli.id == run_config.runtime)
-        {
-            self.status = Some(
-                format!(
-                    "{} is not installed",
-                    engine::Engine::runtime_label(&run_config.runtime)
-                )
-                .into(),
-            );
+        if !engine::Engine::runtime_usable(&run_config.runtime) {
+            let label = self.engine.runtime_label(&run_config.runtime);
+            self.workspace.chat_mut().messages.push(Message {
+                author: Author::Bot,
+                bot: Some(bot_id),
+                parts: vec![Part::Text(format!(
+                    "Run failed: {label} is not installed or not on PATH."
+                ))],
+                time: "now".into(),
+                streaming: false,
+                stopped: false,
+            });
+            self.workspace.replace_last_preview();
+            self.persist_workspace();
             cx.notify();
             return;
         }
@@ -261,6 +360,7 @@ impl Shell {
         self.workspace.replace_last_preview();
         self.status = Some("Starting…".into());
         self.run_bot = Some(bot_id);
+        self.run_chat = Some(self.workspace.chat().id);
         self.generation += 1;
         self.saw_assistant_text = false;
         let generation = self.generation;
@@ -268,84 +368,125 @@ impl Shell {
         self.persist_workspace();
 
         let engine = Arc::clone(&self.engine);
-        let (sender, receiver) = std::sync::mpsc::channel();
-        std::thread::spawn(move || engine.run_prompt(run_config, prompt, sender));
+        let chat_id = self.workspace.chat().id;
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        std::thread::spawn(move || engine.run_prompt(chat_id, run_config, prompt, sender));
 
         cx.spawn_in(window, async move |this, cx| {
-            loop {
-                match this.update(cx, |shell, _cx| shell.generation == generation) {
-                    Ok(true) => {}
-                    _ => return,
-                }
-                let mut finished = false;
-                while let Ok(event) = receiver.try_recv() {
+            while let Some(event) = receiver.recv().await {
+                let applied = this.update(cx, |shell, cx| {
+                    if shell.generation != generation {
+                        return false;
+                    }
                     match event {
-                        EngineEvent::Runtime(event) => {
-                            let _ =
-                                this.update(cx, |shell, cx| shell.apply_runtime_event(event, cx));
+                        EngineEvent::Action(action) => shell.apply(action, cx),
+                        EngineEvent::SessionId(session_id) => {
+                            shell.workspace.chat_mut().session_id = Some(session_id);
+                            shell.persist_workspace();
                         }
-                        EngineEvent::Finished(Ok(_mission_id)) => {
-                            let _ = this.update(cx, |shell, cx| shell.finish_run(cx));
-                            finished = true;
-                            break;
+                        EngineEvent::Permission {
+                            id,
+                            kind,
+                            summary,
+                            choices,
+                            tool_call_id,
+                        } => {
+                            let mut detail = match &kind {
+                                PermissionKind::Tool { name } => format!("tool · {name}"),
+                                PermissionKind::Command { cmdline } => cmdline.clone(),
+                                PermissionKind::FileWrite { path } => format!("write · {path}"),
+                            };
+                            if let Some(call) = tool_call_id {
+                                detail.push_str(&format!(" · {call}"));
+                            }
+                            let buttons = choices
+                                .iter()
+                                .map(|choice| (permission_label(choice), !is_deny(choice)))
+                                .collect();
+                            shell.waiting(Part::Approval {
+                                kicker: "Permission".to_string(),
+                                title: summary,
+                                detail,
+                                request: Some(id),
+                                choices: buttons,
+                                resolved: None,
+                            });
+                            shell.set_waiting("Waiting for your approval…", cx);
+                        }
+                        EngineEvent::Questions { id, questions } => {
+                            let count = questions.len();
+                            for (index, question) in questions.into_iter().enumerate() {
+                                let header = if question.header.trim().is_empty() {
+                                    format!("Question {}", index + 1)
+                                } else {
+                                    question.header
+                                };
+                                shell.waiting(Part::Question {
+                                    request: id,
+                                    index,
+                                    header,
+                                    question: question.question,
+                                    options: question.options,
+                                    multi_select: question.multi_select,
+                                    allow_free_text: question.allow_free_text,
+                                    secret: question.secret,
+                                    selected: Vec::new(),
+                                    resolved: None,
+                                });
+                            }
+                            shell.set_waiting(
+                                &format!("Waiting for your answer · {count} question(s)"),
+                                cx,
+                            );
+                        }
+                        EngineEvent::Finished(Ok(())) => {
+                            shell.finish_run(cx);
+                            return false;
                         }
                         EngineEvent::Finished(Err(error)) => {
-                            let _ = this.update(cx, |shell, cx| shell.fail_run(error, cx));
-                            finished = true;
-                            break;
+                            shell.fail_run(error, cx);
+                            return false;
                         }
                     }
-                }
-                if finished {
+                    true
+                });
+                if !matches!(applied, Ok(true)) {
                     return;
                 }
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(24))
-                    .await;
             }
         })
         .detach();
         cx.notify();
     }
 
-    fn apply_runtime_event(
-        &mut self,
-        event: aucteris_core::ExecutionEvent,
-        cx: &mut Context<Self>,
-    ) {
-        let action = match event.event {
-            aucteris_core::runtime::RuntimeEvent::SessionStarted { model } => Action::Intent(
-                model
-                    .map(|name| format!("Connected · {name}"))
-                    .unwrap_or_else(|| "Connected to agent CLI".to_string()),
-            ),
-            aucteris_core::runtime::RuntimeEvent::AssistantMessage { text } => Action::Say(text),
-            aucteris_core::runtime::RuntimeEvent::FinalResult { text } => {
-                if self.saw_assistant_text {
-                    return;
-                }
-                Action::Say(text)
-            }
-            aucteris_core::runtime::RuntimeEvent::ToolCall { name } => Action::Tool {
-                label: name.clone(),
-                activity: format!("Running {name}"),
-            },
-            aucteris_core::runtime::RuntimeEvent::ToolResult { ok } => Action::Settle(if ok {
-                "Completed".to_string()
-            } else {
-                "Failed".to_string()
-            }),
-            aucteris_core::runtime::RuntimeEvent::Error { message } => Action::Error(message),
-            aucteris_core::runtime::RuntimeEvent::Usage {
-                input_tokens,
-                output_tokens,
-            } => Action::Usage {
-                input: input_tokens,
-                output: output_tokens,
-            },
-            aucteris_core::runtime::RuntimeEvent::Other => return,
-        };
-        self.apply(action, cx);
+    /// Attach a card (approval, question) to the reply being streamed.
+    pub(crate) fn waiting(&mut self, part: Part) {
+        if let Some(message) = self.reply_mut() {
+            message.push_part(part);
+        }
+    }
+
+    /// The agent is blocked on the person: say so everywhere it shows.
+    pub(crate) fn set_waiting(&mut self, status: &str, cx: &mut Context<Self>) {
+        self.status = Some(status.to_string().into());
+        if let Some(bot) = self.run_bot.and_then(|id| self.workspace.bot_mut(id)) {
+            bot.presence = Presence::Waiting;
+            bot.activity = status.to_string().into();
+        }
+        self.workspace.replace_last_preview();
+        self.scroll.scroll_to_bottom();
+        cx.notify();
+    }
+
+    /// The bot reply being streamed. Last message is not necessarily it: a
+    /// steer appends the user's own line while the answer is still open.
+    fn reply_mut(&mut self) -> Option<&mut Message> {
+        self.workspace
+            .chat_mut()
+            .messages
+            .iter_mut()
+            .rev()
+            .find(|message| message.streaming)
     }
 
     fn apply(&mut self, action: Action, cx: &mut Context<Self>) {
@@ -359,32 +500,81 @@ impl Shell {
             }
             Action::Say(text) => {
                 self.saw_assistant_text = true;
-                if let Some(message) = self.workspace.chat_mut().messages.last_mut() {
+                if let Some(message) = self.reply_mut() {
                     message.push_text(&text);
                 }
             }
-            Action::Tool { label, activity } => {
+            Action::Thought(text) => {
+                if let Some(message) = self.reply_mut() {
+                    message.push_thought(&text);
+                }
+            }
+            Action::Tool {
+                icon,
+                label,
+                activity,
+                detail,
+            } => {
                 self.status = Some(activity.clone().into());
                 if let Some(bot) = bot_id.and_then(|id| self.workspace.bot_mut(id)) {
                     bot.activity = activity.into();
                 }
-                if let Some(message) = self.workspace.chat_mut().messages.last_mut() {
+                if let Some(message) = self.reply_mut() {
                     message.push_part(Part::Tool {
-                        icon: engine::tool_icon(&label),
+                        icon,
                         label,
-                        detail: None,
+                        detail,
                         done: false,
                         result: None,
                     });
                 }
             }
+            Action::ToolProgress { text, append } => {
+                if let Some(message) = self.reply_mut() {
+                    if let Some(Part::Tool { result, .. }) = message
+                        .parts
+                        .iter_mut()
+                        .rev()
+                        .find(|part| matches!(part, Part::Tool { done: false, .. }))
+                    {
+                        match result {
+                            Some(slot) if append => slot.push_str(&text),
+                            slot => *slot = Some(text),
+                        }
+                    }
+                }
+                cx.notify();
+                return;
+            }
+            Action::Phase(phase) => {
+                self.status = Some(phase.into());
+                if let Some(bot) = bot_id.and_then(|id| self.workspace.bot_mut(id)) {
+                    bot.activity = phase.into();
+                }
+                cx.notify();
+                return;
+            }
+            Action::Files {
+                path,
+                added,
+                removed,
+            } => {
+                if let Some(message) = self.reply_mut() {
+                    message.push_part(Part::Files {
+                        path,
+                        added,
+                        removed,
+                        undone: false,
+                    });
+                }
+            }
             Action::Settle(result) => {
-                if let Some(message) = self.workspace.chat_mut().messages.last_mut() {
+                if let Some(message) = self.reply_mut() {
                     message.finish_last_tool(Some(result));
                 }
             }
             Action::Error(text) => {
-                if let Some(message) = self.workspace.chat_mut().messages.last_mut() {
+                if let Some(message) = self.reply_mut() {
                     message.push_text(&format!("\n\n{text}"));
                 }
             }
@@ -398,12 +588,11 @@ impl Shell {
         }
         self.workspace.replace_last_preview();
         self.scroll.scroll_to_bottom();
-        self.persist_workspace();
         cx.notify();
     }
 
     fn finish_run(&mut self, cx: &mut Context<Self>) {
-        if let Some(message) = self.workspace.chat_mut().messages.last_mut() {
+        if let Some(message) = self.reply_mut() {
             message.streaming = false;
             message.finish_last_tool(None);
         }
@@ -414,6 +603,9 @@ impl Shell {
             }
         }
         self.run_bot = None;
+        self.run_chat = None;
+        self.free_text_question = None;
+        self.close_cards();
         self.status = None;
         self.workspace.replace_last_preview();
         self.persist_workspace();
@@ -421,7 +613,7 @@ impl Shell {
     }
 
     fn fail_run(&mut self, error: String, cx: &mut Context<Self>) {
-        if let Some(message) = self.workspace.chat_mut().messages.last_mut() {
+        if let Some(message) = self.reply_mut() {
             message.streaming = false;
             if !error.trim().is_empty() {
                 if !message.parts.is_empty() {
@@ -437,6 +629,9 @@ impl Shell {
                 bot.activity = "Run failed".into();
             }
         }
+        self.run_chat = None;
+        self.free_text_question = None;
+        self.close_cards();
         self.status = None;
         self.workspace.replace_last_preview();
         self.persist_workspace();
@@ -447,8 +642,10 @@ impl Shell {
     /// stopped, so nothing already useful disappears.
     pub(crate) fn stop_run(&mut self, cx: &mut Context<Self>) {
         self.generation += 1;
-        self.engine.cancel_active();
-        if let Some(message) = self.workspace.chat_mut().messages.last_mut() {
+        if let Some(chat_id) = self.run_chat {
+            self.engine.stop(chat_id);
+        }
+        if let Some(message) = self.reply_mut() {
             if message.streaming {
                 message.streaming = false;
                 message.stopped = true;
@@ -461,6 +658,9 @@ impl Shell {
                 bot.activity = "Stopped on request".into();
             }
         }
+        self.run_chat = None;
+        self.free_text_question = None;
+        self.close_cards();
         self.status = None;
         self.workspace.replace_last_preview();
         self.persist_workspace();
@@ -469,22 +669,9 @@ impl Shell {
 
     // ---- bot panel actions ----------------------------------------------
 
-    pub(crate) fn cycle_runtime(&mut self, bot_id: u32, cx: &mut Context<Self>) {
+    pub(crate) fn cycle_sandbox(&mut self, bot_id: u32, cx: &mut Context<Self>) {
         if let Some(bot) = self.workspace.bot_mut(bot_id) {
-            let runtimes = self
-                .available_runtimes
-                .iter()
-                .map(|cli| cli.id)
-                .collect::<Vec<_>>();
-            if runtimes.is_empty() {
-                return;
-            }
-            let current = runtimes
-                .iter()
-                .position(|runtime| *runtime == bot.runtime.as_ref())
-                .unwrap_or(0);
-            let next = runtimes[(current + 1) % runtimes.len()];
-            bot.runtime = next.into();
+            bot.sandbox = model::next_sandbox(bot.sandbox);
         }
         self.persist_workspace();
         cx.notify();
@@ -523,6 +710,7 @@ impl Shell {
 
     pub(crate) fn toggle_panel(&mut self, cx: &mut Context<Self>) {
         self.panel_open = !self.panel_open;
+        self.panel_picker.open = false;
         cx.notify();
     }
 
@@ -561,6 +749,7 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         let modifiers = event.keystroke.modifiers;
+        self.caret_visible = true;
         // Ctrl+Enter is the send chord when Enter is a line break.
         if modifiers.control || modifiers.platform {
             if event.keystroke.key == "enter" && !self.settings.send_on_enter {
@@ -584,7 +773,12 @@ impl Shell {
                 cx.notify();
             }
             "escape" => {
-                self.draft.clear();
+                // An open panel picker eats Escape before the draft does.
+                if self.panel_picker.open {
+                    self.panel_picker.open = false;
+                } else {
+                    self.draft.clear();
+                }
                 cx.notify();
             }
             key => {
@@ -644,6 +838,11 @@ impl Shell {
 
     /// Shortcuts work from anywhere, including an empty window.
     fn on_root_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.create_menu_open && event.keystroke.key == "escape" {
+            self.create_menu_open = false;
+            cx.notify();
+            return;
+        }
         if event.keystroke.modifiers.control || event.keystroke.modifiers.platform {
             self.shortcuts(event, window, cx);
         }
@@ -666,6 +865,7 @@ impl Render for Shell {
 
         let sidebar = self.view_sidebar(&theme, cx);
         let chat = self.view_chat(&theme, window, cx);
+        let create_menu = self.view_create_menu(&theme, cx);
         let overlay = self.view_overlay(&theme, cx);
         let main_pane = div()
             .flex_1()
@@ -720,7 +920,25 @@ impl Render for Shell {
             .child(sidebar)
             .child(main_pane)
             .children(right_panel)
+            .children(create_menu)
             .children(overlay)
             .into_any_element()
     }
+}
+
+/// What a permission button says.
+fn permission_label(choice: &PermissionChoice) -> String {
+    match choice {
+        PermissionChoice::Allow => "Allow".to_string(),
+        PermissionChoice::AllowAlways { scope } => match scope {
+            Scope::Chat => "Always in this chat".to_string(),
+            Scope::Repo => "Always in this repo".to_string(),
+            Scope::Pattern(pattern) => format!("Always: {pattern}"),
+        },
+        PermissionChoice::Deny => "Deny".to_string(),
+    }
+}
+
+fn is_deny(choice: &PermissionChoice) -> bool {
+    matches!(choice, PermissionChoice::Deny)
 }
