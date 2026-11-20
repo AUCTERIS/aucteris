@@ -90,6 +90,7 @@ impl Shell {
     }
 
     /// One row of the "+" menu: glyph, name, one-line detail.
+    #[allow(clippy::too_many_arguments)]
     fn menu_entry<F>(
         &self,
         theme: &Theme,
@@ -482,7 +483,7 @@ impl Shell {
         } else {
             theme.ink.opacity(0.0)
         };
-        let title_color = if selected { theme.ink } else { theme.ink };
+        let title_color = theme.ink;
         let preview_color = if selected {
             theme.ink_secondary
         } else {

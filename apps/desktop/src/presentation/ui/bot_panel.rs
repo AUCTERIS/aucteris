@@ -452,6 +452,7 @@ impl Shell {
             .into_any_element()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn panel_row<F>(
         &self,
         theme: &Theme,

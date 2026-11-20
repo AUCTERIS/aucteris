@@ -3,8 +3,8 @@
 //! This is deliberately plain data — no entities, no async. The shell owns one
 //! [`Workspace`] is the UI's persisted view of the integrated local engine.
 
+use aucteris_harness::komet_proto::SandboxLevel;
 use gpui::SharedString;
-use komet_proto::SandboxLevel;
 
 /// How a sandbox level reads in a row or a status strip.
 pub fn sandbox_label(level: SandboxLevel) -> &'static str {
@@ -41,6 +41,7 @@ impl Presence {
         }
     }
 
+    #[allow(dead_code)]
     pub fn is_working(self) -> bool {
         matches!(self, Self::Working)
     }
@@ -472,6 +473,7 @@ impl Workspace {
             .or_else(|| audience.first().copied())
     }
 
+    #[allow(dead_code)]
     pub fn total_working(&self) -> usize {
         self.bots
             .iter()

@@ -93,7 +93,8 @@ impl AttemptRunner {
         exec.reconcile_interrupted(&input.mission_id)
             .map_err(|e| TerminalError::new(format!("reconcile: {e}")))?;
 
-        let mission = store()?
+        let store = store()?;
+        let mission = store
             .load_mission(&input.mission_id)
             .map_err(|e| TerminalError::new(format!("load mission: {e}")))?;
         let spec = mission
@@ -102,10 +103,27 @@ impl AttemptRunner {
             .find(|t| t.id == input.task_id)
             .cloned()
             .ok_or_else(|| TerminalError::new(format!("task {} not found", input.task_id)))?;
+        // Resume the agent session a previous attempt of this task
+        // reported, when the runtime supports persistent sessions.
+        let mut state = store
+            .load_state(&input.mission_id)
+            .map_err(|e| TerminalError::new(format!("load state: {e}")))?;
+        let resume = state
+            .iter()
+            .find(|r| r.task_id == input.task_id)
+            .and_then(|r| r.session_id.clone());
 
         let attempt = exec
-            .execute_attempt(&mission, &spec)
+            .execute_attempt(&mission, &spec, resume)
             .map_err(|e| TerminalError::new(format!("attempt: {e}")))?;
+        if let Some(session_id) = &attempt.session_id
+            && let Some(run) = state.iter_mut().find(|r| r.task_id == input.task_id)
+        {
+            run.session_id = Some(session_id.clone());
+            store
+                .save_state(&input.mission_id, &state)
+                .map_err(|e| TerminalError::new(format!("save state: {e}")))?;
+        }
 
         let status = match attempt.status {
             AttemptStatus::Succeeded => "succeeded",

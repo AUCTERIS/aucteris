@@ -139,6 +139,7 @@ pub fn presence_dot(presence: Presence, theme: &Theme, size: f32) -> AnyElement 
 }
 
 /// A small static pill: a model name, a machine, a word.
+#[allow(dead_code)]
 pub fn chip(label: impl Into<SharedString>, theme: &Theme) -> AnyElement {
     div()
         .flex_shrink_0()
@@ -156,6 +157,7 @@ pub fn chip(label: impl Into<SharedString>, theme: &Theme) -> AnyElement {
 }
 
 /// A pill with a leading glyph, for "which machine" style facts.
+#[allow(dead_code)]
 pub fn chip_with_icon(
     glyph: &'static str,
     label: impl Into<SharedString>,

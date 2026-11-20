@@ -114,6 +114,29 @@ impl AucterisCore {
         infrastructure::process::cancel_active()
     }
 
+    /// Deliver an operator steer prompt to a task's live attempt.
+    /// Returns false when the task has no running attempt or its runtime
+    /// does not drain the steering channel.
+    pub fn steer(&self, mission_id: &str, task_id: &str, text: &str) -> Result<bool> {
+        Ok(executor::steer_task(mission_id, task_id, text))
+    }
+
+    /// Resolve a pending per-tool approval (`MissionSpec::tool_approval`).
+    /// `decision` is "allow", "allow_always" or "deny".
+    pub fn resolve_tool_approval(
+        &self,
+        mission_id: &str,
+        request_id: &str,
+        decision: &str,
+    ) -> Result<bool> {
+        executor::resolve_tool_approval(&self.store, mission_id, request_id, decision)
+    }
+
+    /// Pending per-tool approval requests for a mission.
+    pub fn pending_tool_approvals(&self, mission_id: &str) -> Vec<serde_json::Value> {
+        executor::pending_tool_approvals(&self.store, mission_id)
+    }
+
     /// Persist and execute a mission in one call.
     pub fn execute(&self, spec: &MissionSpec) -> Result<Mission> {
         let mission = self.submit(spec)?;

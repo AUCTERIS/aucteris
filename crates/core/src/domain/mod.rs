@@ -91,6 +91,13 @@ pub struct MissionSpec {
     /// fail the mission. Default OFF.
     #[serde(default)]
     pub sync_memory: bool,
+    /// Route every tool-permission request through the engine approval
+    /// gate (`<mission>/approvals/`) instead of the runtime's own
+    /// auto-approve. Opt-in: unanswered requests deny on timeout.
+    /// Only effective on adapters declaring `mediated_tools`; others
+    /// record an honest limitation. Default OFF.
+    #[serde(default)]
+    pub tool_approval: bool,
     pub tasks: Vec<TaskSpec>,
 }
 
@@ -161,6 +168,10 @@ pub struct Mission {
     pub memory_namespace: Option<String>,
     #[serde(default)]
     pub sync_memory: bool,
+    /// Whether attempts gate tool permissions through the engine
+    /// approval flow (see MissionSpec::tool_approval).
+    #[serde(default)]
+    pub tool_approval: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -168,6 +179,10 @@ pub struct TaskRun {
     pub task_id: String,
     pub status: TaskStatus,
     pub attempts: Vec<String>, // attempt ids, oldest first
+    /// Latest harness-native session id reported by an attempt of this
+    /// task; the next attempt resumes it (`RunRequest::resume_session`).
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,6 +211,10 @@ pub struct Attempt {
     /// kill orphans after an engine restart.
     #[serde(default)]
     pub pid: Option<u32>,
+    /// Harness-native session id this attempt ran under (persistent
+    /// agent sessions). `None` for runtimes without session support.
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 /// Evidence categories per doc 09 §2 — the distinction is the product.

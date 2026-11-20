@@ -519,6 +519,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "tempfile",
  "temporalio-client",
  "temporalio-common",
  "temporalio-macros",
@@ -535,16 +536,32 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "aucteris-core",
+ "aucteris-harness",
  "futures",
  "gpui",
  "gpui_platform",
  "image",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "aucteris-harness"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "aucteris-core",
+ "futures",
  "komet-harness",
  "komet-proto",
+ "libc",
  "serde",
  "serde_json",
  "tokio",
- "unicode-segmentation",
 ]
 
 [[package]]
