@@ -1,22 +1,14 @@
 //! Desktop integration with the embedded Aucteris execution engine.
 
 use crate::application::session::{self, Sessions};
-use aucteris_core::{
-    AucterisCore, CoreConfig,
-    domain::{MissionSpec, MissionStatus, TaskSpec},
-};
-use komet_proto::{
-    PermissionChoice, PermissionKind, RunRequest, SandboxLevel, SandboxOptions, UserInputQuestion,
-};
+use aucteris_core::{AucterisCore, CoreConfig};
+use aucteris_harness::komet_proto::{PermissionChoice, RunRequest, SandboxLevel, SandboxOptions};
 use std::collections::HashMap;
-use std::{
-    path::PathBuf,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
-};
+use std::path::PathBuf;
+use std::sync::Mutex;
 use tokio::sync::mpsc::UnboundedSender;
+
+pub use crate::application::session::{Action, EngineEvent};
 
 #[derive(Debug, Clone, Copy)]
 pub struct AgentCli {
@@ -282,95 +274,11 @@ pub const SUPPORTED_MODELS: &[AgentModel] = &[
     },
 ];
 
-#[derive(Debug)]
-pub enum EngineEvent {
-    Action(Action),
-    /// Harness-native session id: the next prompt in this chat resumes it.
-    SessionId(String),
-    /// The agent is blocked on an approval. Answer with
-    /// [`Engine::answer_permission`].
-    Permission {
-        id: u64,
-        kind: PermissionKind,
-        summary: String,
-        choices: Vec<PermissionChoice>,
-        tool_call_id: Option<String>,
-    },
-    /// The agent is blocked on questions. Answer with
-    /// [`Engine::answer_question`], one question at a time.
-    Questions {
-        id: u64,
-        questions: Vec<UserInputQuestion>,
-    },
-    Finished(Result<(), String>),
-}
-
-#[derive(Debug, Clone)]
-pub enum Action {
-    Intent(String),
-    Say(String),
-    Thought(String),
-    Tool {
-        icon: &'static str,
-        label: String,
-        activity: String,
-        detail: Option<String>,
-    },
-    /// A tool's live output: replaces its preview, or extends it when the
-    /// harness streams deltas.
-    ToolProgress {
-        text: String,
-        append: bool,
-    },
-    /// Coarse run phase, for the status line only.
-    Phase(&'static str),
-    Files {
-        path: String,
-        added: u32,
-        removed: u32,
-    },
-    Settle(String),
-    Error(String),
-    Usage {
-        input: u64,
-        output: u64,
-    },
-}
-
-pub fn tool_icon(name: &str) -> &'static str {
-    let normalized = name.to_ascii_lowercase();
-    if normalized.contains("bash")
-        || normalized.contains("command")
-        || normalized.contains("terminal")
-    {
-        "terminal"
-    } else if normalized.contains("read")
-        || normalized.contains("file")
-        || normalized.contains("edit")
-        || normalized.contains("write")
-    {
-        "file"
-    } else if normalized.contains("search")
-        || normalized.contains("grep")
-        || normalized.contains("glob")
-    {
-        "search"
-    } else if normalized.contains("web")
-        || normalized.contains("fetch")
-        || normalized.contains("browser")
-    {
-        "globe"
-    } else {
-        "bot"
-    }
-}
-
 /// One model offered in the picker: the static catalog merged with whatever
 /// the installed CLI reported at startup.
 #[derive(Debug, Clone)]
 pub struct ModelChoice {
     pub id: String,
-    pub runtime_id: String,
     pub provider: String,
     pub icon: &'static str,
     pub label: String,
@@ -382,16 +290,12 @@ pub struct Engine {
     core: AucterisCore,
     data_dir: PathBuf,
     available: Vec<AgentCli>,
-    /// Serializes the legacy mission path only (CLIs without a harness).
-    run_lock: Mutex<()>,
     sessions: Sessions,
     /// Models each CLI reported, keyed by runtime base id.
     live_models: Mutex<HashMap<String, Vec<ModelChoice>>>,
 }
 
 pub struct BotRunConfig {
-    pub id: u32,
-    pub name: String,
     pub runtime: String,
     pub folder: String,
     pub instructions: String,
@@ -412,7 +316,6 @@ impl Engine {
             core,
             data_dir,
             available,
-            run_lock: Mutex::new(()),
             sessions: Sessions::new()?,
             live_models: Mutex::new(HashMap::new()),
         })
@@ -453,7 +356,6 @@ impl Engine {
             }
             out.push(ModelChoice {
                 id: model.id.to_string(),
-                runtime_id: model.runtime_id.to_string(),
                 provider: model.provider.to_string(),
                 icon: model.icon,
                 label: model.label.to_string(),
@@ -469,7 +371,7 @@ impl Engine {
     pub fn discover_models(&self) -> usize {
         let mut discovered = 0;
         for cli in &self.available {
-            let Some(harness) = session::harness(cli.id) else {
+            let Some(harness) = session::komet_backend(cli.id) else {
                 continue;
             };
             let Ok(models) = self.sessions.models(harness.as_ref()) else {
@@ -485,7 +387,6 @@ impl Engine {
                     };
                     ModelChoice {
                         id: format!("{}:{}", cli.id, model.id),
-                        runtime_id: cli.id.to_string(),
                         provider: cli.provider.to_string(),
                         icon: cli.icon,
                         label,
@@ -579,109 +480,43 @@ impl Engine {
         let workspace = crate::infrastructure::storage::expand_home(&bot.folder);
         std::fs::create_dir_all(&workspace)?;
 
-        if let Some(harness) = session::harness(&bot.runtime) {
-            let request = RunRequest {
-                prompt: full_prompt,
-                harness: None,
-                model: bot
-                    .runtime
-                    .split_once(':')
-                    .map(|(_, model)| model.to_string()),
-                reasoning: None,
-                model_options: Default::default(),
-                cwd: workspace.display().to_string(),
-                sandbox: bot.sandbox,
-                sandbox_options: Some(SandboxOptions::from_level(bot.sandbox)),
-                // Full access means exactly that; every other level keeps the
-                // harness in its approval mode so the card can gate the call.
-                auto_approve: bot.sandbox == SandboxLevel::DangerFullAccess,
-                resume: bot.resume.clone(),
-                attachments: Vec::new(),
-                worktree: None,
-                permission_timeout_ms: None,
-                use_mcp: false,
-                mcp: None,
-                mcp_external: Vec::new(),
-            };
-            self.sessions.start(chat_id, harness, request, events);
-            return Ok(());
-        }
-
-        self.run_mission(
-            adapter_name.to_string(),
-            bot,
-            prompt,
-            full_prompt,
-            workspace,
-            events,
-        )
-    }
-
-    /// CLIs without a komet driver (Gemini today) keep the mission path.
-    fn run_mission(
-        &self,
-        runtime: String,
-        bot: &BotRunConfig,
-        prompt: &str,
-        full_prompt: String,
-        workspace: PathBuf,
-        events: UnboundedSender<EngineEvent>,
-    ) -> anyhow::Result<()> {
-        // Cancellation uses a process-global core signal. Serialize runs so
-        // a stopped mission cannot affect the next prompt.
-        let _run_guard = self
-            .run_lock
-            .lock()
-            .map_err(|_| anyhow::anyhow!("agent engine run lock was poisoned"))?;
-        let spec = MissionSpec {
-            objective: format!("{}: {}", bot.name, prompt),
-            constraints: Vec::new(),
-            sandbox: true,
-            allow_network: true,
-            egress_filter: false,
-            memory: false,
-            memory_namespace: None,
-            sync_memory: false,
-            tasks: vec![TaskSpec {
-                id: format!("bot-{}", bot.id),
-                title: bot.name.clone(),
-                prompt: full_prompt,
-                verify_cmd: "true".to_string(),
-                depends_on: Vec::new(),
-                runtime,
-                isolated: false,
-            }],
+        // One runtime path for every CLI: komet driver when it exists,
+        // otherwise the core adapter wrapped as a session backend (gemini,
+        // mock) — same events, same controls, honestly degraded caps.
+        let Some(harness) = session::backend(&bot.runtime, self.core.runtimes()) else {
+            anyhow::bail!("no runtime backend for {:?}", bot.runtime);
         };
-        let mission = self.core.submit_in_workspace(&spec, workspace)?;
-        let saw_text = Arc::new(AtomicBool::new(false));
-        let flag = Arc::clone(&saw_text);
-        let sink = events.clone();
-        self.core.run_with_events(&mission.id, move |execution| {
-            if let Some(action) = translate(execution.event, &flag) {
-                let _ = sink.send(EngineEvent::Action(action));
-            }
-        })?;
-        let finished = self.core.mission(&mission.id)?;
-        let result = if finished.status == MissionStatus::Completed {
-            Ok(())
-        } else {
-            Err(format!(
-                "mission ended with status {:?}; see core evidence for details",
-                finished.status
-            ))
+        let request = RunRequest {
+            prompt: full_prompt,
+            harness: None,
+            model: bot
+                .runtime
+                .split_once(':')
+                .map(|(_, model)| model.to_string()),
+            reasoning: None,
+            model_options: Default::default(),
+            cwd: workspace.display().to_string(),
+            sandbox: bot.sandbox,
+            sandbox_options: Some(SandboxOptions::from_level(bot.sandbox)),
+            // Full access means exactly that; every other level keeps the
+            // harness in its approval mode so the card can gate the call.
+            auto_approve: bot.sandbox == SandboxLevel::DangerFullAccess,
+            resume: bot.resume.clone(),
+            attachments: Vec::new(),
+            worktree: None,
+            permission_timeout_ms: None,
+            use_mcp: false,
+            mcp: None,
+            mcp_external: Vec::new(),
         };
-        let _ = events.send(EngineEvent::Finished(result));
+        self.sessions.start(chat_id, harness, request, events);
         Ok(())
     }
 
-    /// Interrupt this chat's run. The harness gets a protocol-level
-    /// interrupt; only a legacy mission falls back to the global signal.
+    /// Interrupt this chat's run: protocol-level interrupt on komet
+    /// sessions, process-tree kill on CLI backends.
     pub fn stop(&self, chat_id: u32) {
-        if self.sessions.running(chat_id) {
-            self.sessions.stop(chat_id);
-        } else {
-            self.core.cancel_active();
-        }
+        self.sessions.stop(chat_id);
     }
 
     pub fn steer(&self, chat_id: u32, prompt: String) -> bool {
@@ -725,42 +560,6 @@ fn compose_prompt(instructions: &str, prompt: &str) -> String {
         prompt.to_string()
     } else {
         format!("{}\n\nUser request:\n{}", instructions.trim(), prompt)
-    }
-}
-
-/// Map a legacy mission event onto the same actions the harness path emits.
-fn translate(event: aucteris_core::runtime::RuntimeEvent, saw_text: &AtomicBool) -> Option<Action> {
-    match event {
-        aucteris_core::runtime::RuntimeEvent::SessionStarted { model } => Some(Action::Intent(
-            model
-                .map(|name| format!("Connected · {name}"))
-                .unwrap_or_else(|| "Connected to agent CLI".to_string()),
-        )),
-        aucteris_core::runtime::RuntimeEvent::AssistantMessage { text } => {
-            saw_text.store(true, Ordering::Relaxed);
-            Some(Action::Say(text))
-        }
-        aucteris_core::runtime::RuntimeEvent::FinalResult { text } => {
-            (!saw_text.load(Ordering::Relaxed)).then_some(Action::Say(text))
-        }
-        aucteris_core::runtime::RuntimeEvent::ToolCall { name } => Some(Action::Tool {
-            icon: tool_icon(&name),
-            activity: format!("Running {name}"),
-            label: name,
-            detail: None,
-        }),
-        aucteris_core::runtime::RuntimeEvent::ToolResult { ok } => Some(Action::Settle(
-            if ok { "Completed" } else { "Failed" }.to_string(),
-        )),
-        aucteris_core::runtime::RuntimeEvent::Error { message } => Some(Action::Error(message)),
-        aucteris_core::runtime::RuntimeEvent::Usage {
-            input_tokens,
-            output_tokens,
-        } => Some(Action::Usage {
-            input: input_tokens,
-            output: output_tokens,
-        }),
-        aucteris_core::runtime::RuntimeEvent::Other => None,
     }
 }
 

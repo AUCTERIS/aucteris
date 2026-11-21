@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["apps/cli", "apps/desktop", "crates/core"]
+members = ["apps/cli", "apps/desktop", "crates/core", "crates/harness"]
 default-members = ["apps/desktop"]
 
 [workspace.package]
@@ -11,7 +11,9 @@ publish = false
 
 [workspace.dependencies]
 aucteris-core = { path = "crates/core" }
+aucteris-harness = { path = "crates/harness" }
 anyhow = "1"
+async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 ctrlc = "3"
 futures = "0.3"

@@ -125,16 +125,16 @@ impl RuntimeAdapter for DevinAdapter {
         // Print mode has no result envelope: stdout IS the reply. Fold
         // the persisted raw lines back into agent_assertion so reports
         // carry the agent's claim instead of "<none>".
-        if outcome.exit_code == 0 {
-            if let Ok(raw) = std::fs::read_to_string(&req.events_path) {
-                let text = raw
-                    .lines()
-                    .filter(|line| !line.starts_with("{\"type\":\"_stderr_tail\""))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                if !text.trim().is_empty() {
-                    outcome.agent_assertion = Some(text);
-                }
+        if outcome.exit_code == 0
+            && let Ok(raw) = std::fs::read_to_string(&req.events_path)
+        {
+            let text = raw
+                .lines()
+                .filter(|line| !line.starts_with("{\"type\":\"_stderr_tail\""))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !text.trim().is_empty() {
+                outcome.agent_assertion = Some(text);
             }
         }
         Ok(outcome)
@@ -202,6 +202,9 @@ mod tests {
             egress_filter: None,
             mcp: None,
             event_sink: None,
+            resume_session: None,
+            interactions: None,
+            steering: None,
         };
         let args = build_args(&req);
         assert_eq!(args[0], "-p");

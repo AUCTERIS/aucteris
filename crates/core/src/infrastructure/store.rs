@@ -72,6 +72,7 @@ impl Store {
             memory: spec.memory,
             memory_namespace: spec.memory_namespace.clone(),
             sync_memory: spec.sync_memory,
+            tool_approval: spec.tool_approval,
         };
         self.save_mission(&mission)?;
         self.save_state(
@@ -83,6 +84,7 @@ impl Store {
                     task_id: t.id.clone(),
                     status: TaskStatus::Pending,
                     attempts: vec![],
+                    session_id: None,
                 })
                 .collect::<Vec<_>>(),
         )?;
@@ -218,6 +220,7 @@ mod tests {
             memory: false,
             memory_namespace: None,
             sync_memory: false,
+            tool_approval: false,
             tasks: vec![TaskSpec {
                 id: "t".into(),
                 title: "t".into(),

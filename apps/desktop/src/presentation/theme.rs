@@ -27,6 +27,7 @@ impl Appearance {
         matches!(self, Self::Dark)
     }
 
+    #[allow(dead_code)]
     pub fn label(self) -> &'static str {
         match self {
             Self::Dark => "Midnight",
@@ -235,6 +236,7 @@ impl Theme {
     }
 
     /// The user's own message plate: a tint, not a second sidebar.
+    #[allow(dead_code)]
     pub fn bubble(&self) -> Hsla {
         self.ink.opacity(if self.is_dark() { 0.07 } else { 0.05 })
     }
@@ -307,6 +309,7 @@ pub mod text {
     pub const SHEET_TITLE: f32 = 17.0;
     pub const BUBBLE: f32 = 15.0;
     pub const BUBBLE_LINE: f32 = 22.0;
+    #[allow(dead_code)]
     pub const MENU_ITEM: f32 = 14.0;
     pub const BODY: f32 = 13.0;
     pub const META: f32 = 12.0;

@@ -121,7 +121,20 @@ impl MissionActivities {
                 .find(|t| t.id == task_id)
                 .cloned()
                 .ok_or_else(|| anyhow::anyhow!("task {task_id} not found"))?;
-            let attempt = exec.execute_attempt(&mission, &spec)?;
+            // Resume the agent session a previous attempt reported.
+            let store = store()?;
+            let mut state = store.load_state(&mission_id)?;
+            let resume = state
+                .iter()
+                .find(|r| r.task_id == task_id)
+                .and_then(|r| r.session_id.clone());
+            let attempt = exec.execute_attempt(&mission, &spec, resume)?;
+            if let Some(session_id) = &attempt.session_id
+                && let Some(run) = state.iter_mut().find(|r| r.task_id == task_id)
+            {
+                run.session_id = Some(session_id.clone());
+                store.save_state(&mission_id, &state)?;
+            }
             let status = match attempt.status {
                 AttemptStatus::Succeeded => "succeeded",
                 AttemptStatus::Failed => "failed",

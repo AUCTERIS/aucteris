@@ -20,11 +20,11 @@ fn build_args(req: &RunRequest) -> Vec<String> {
         "--auto".into(), // auto-approve permissions not explicitly denied
     ];
     // Optional model override: OPENCODE_MODEL=provider/model#variant.
-    if let Ok(m) = std::env::var("OPENCODE_MODEL") {
-        if !m.is_empty() {
-            args.push("--model".into());
-            args.push(m);
-        }
+    if let Ok(m) = std::env::var("OPENCODE_MODEL")
+        && !m.is_empty()
+    {
+        args.push("--model".into());
+        args.push(m);
     }
     args.push(req.prompt.clone());
     args

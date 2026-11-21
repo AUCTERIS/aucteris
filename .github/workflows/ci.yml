@@ -20,5 +20,7 @@ jobs:
           sudo apt-get install -y protobuf-compiler libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-dev libxcb1-dev libx11-xcb-dev libfontconfig1-dev libfreetype-dev libasound2-dev libvulkan-dev libdbus-1-dev pkg-config cmake
       - name: Check formatting
         run: cargo fmt --all -- --check
-      - name: Check workspace
-        run: cargo check --workspace --all-targets
+      - name: Lint workspace
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test workspace
+        run: cargo test --workspace

@@ -3,7 +3,11 @@
 use crate::infrastructure::sandbox::{SandboxMounts, SandboxPlan};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 /// What an adapter can actually enforce/expose. Reported honestly.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,6 +96,110 @@ pub struct RunRequest {
     /// Optional live normalized event sink. CLI adapters call it as events
     /// arrive; custom adapters may emit their own normalized events here.
     pub event_sink: Option<Arc<dyn Fn(RuntimeEvent) + Send + Sync>>,
+    /// Harness-native session id to resume (persistent agent sessions).
+    /// `None` starts a fresh session. Adapters without session support
+    /// ignore it — recorded, never silently dropped.
+    pub resume_session: Option<String>,
+    /// Per-tool approval bridge. When set, the adapter MUST route every
+    /// tool-permission request through it and honor the decision; when
+    /// `None` the adapter applies its own policy (usually auto-approve)
+    /// and records that in `RunOutcome`/limitations.
+    pub interactions: Option<ApprovalHandler>,
+    /// Operator steer prompts for this attempt, drained by the adapter at
+    /// its steering boundary. `None` = steering unsupported/unwired.
+    pub steering: Option<SteerInbox>,
+}
+
+/// One tool-permission request the engine needs a human/operator decision on.
+#[derive(Debug, Clone)]
+pub struct ApprovalRequest {
+    /// Engine-generated id; the resolver echoes it back.
+    pub request_id: String,
+    /// Runtime-reported permission kind (e.g. "bash", "edit", "fetch").
+    pub kind: String,
+    /// Human-readable summary of what is being approved.
+    pub summary: String,
+    /// Offered choices, in order (e.g. ["allow", "allow_always", "deny"]).
+    pub choices: Vec<String>,
+    /// Runtime tool-call id the approval gates, when known.
+    pub tool_call_id: Option<String>,
+}
+
+/// The operator's answer to an [`ApprovalRequest`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalDecision {
+    Allow,
+    AllowAlways,
+    Deny,
+}
+
+impl ApprovalDecision {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Allow => "allow",
+            Self::AllowAlways => "allow_always",
+            Self::Deny => "deny",
+        }
+    }
+}
+
+/// Bridge the adapter calls (possibly from an async context) to whatever
+/// resolves approvals — a file gate, a durable workflow, a UI channel.
+/// The returned receiver yields exactly one decision; a dropped sender
+/// means "unanswered" and the adapter must degrade to Deny, never hang.
+pub type ApprovalHandler =
+    Arc<dyn Fn(ApprovalRequest) -> tokio::sync::oneshot::Receiver<ApprovalDecision> + Send + Sync>;
+
+/// Cloneable inbox of steer prompts for one attempt. The sender side is
+/// held by the engine (`AucterisCore::steer`); the receiver is drained by
+/// the adapter's steering thread.
+#[derive(Clone)]
+pub struct SteerInbox {
+    rx: Arc<Mutex<std::sync::mpsc::Receiver<String>>>,
+}
+
+impl SteerInbox {
+    /// Create an inbox plus the sender the engine keeps.
+    pub fn pair() -> (Self, std::sync::mpsc::Sender<String>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        (
+            Self {
+                rx: Arc::new(Mutex::new(rx)),
+            },
+            tx,
+        )
+    }
+
+    /// Next queued steer prompt, or `None` when the channel is empty or
+    /// the sender was dropped. Non-blocking by contract: adapters poll it
+    /// at their steering boundary.
+    pub fn try_recv(&self) -> Option<String> {
+        self.rx
+            .lock()
+            .ok()?
+            .try_recv()
+            .ok()
+            .filter(|text| !text.trim().is_empty())
+    }
+
+    /// Block up to `dur` for the next steer prompt. Intended for a
+    /// dedicated drain thread inside an adapter — never call from an
+    /// async runtime worker. Distinguishes timeout from sender drop so
+    /// the drain loop can exit instead of spinning forever.
+    pub fn recv_timeout(
+        &self,
+        dur: std::time::Duration,
+    ) -> Result<String, std::sync::mpsc::RecvTimeoutError> {
+        let rx = self
+            .rx
+            .lock()
+            .map_err(|_| std::sync::mpsc::RecvTimeoutError::Disconnected)?;
+        match rx.recv_timeout(dur) {
+            Ok(text) if !text.trim().is_empty() => Ok(text),
+            Ok(_) => Err(std::sync::mpsc::RecvTimeoutError::Timeout),
+            Err(e) => Err(e),
+        }
+    }
 }
 
 /// Engine-provided MCP server injection for one attempt.
@@ -123,6 +231,9 @@ pub struct RunOutcome {
     /// (allowed, denied) proxy connections when egress filtering was
     /// active for this attempt.
     pub egress: Option<(u64, u64)>,
+    /// Harness-native session id the runtime reported (persistent
+    /// sessions). `None` for runtimes without session support.
+    pub session_id: Option<String>,
 }
 
 /// The adapter contract (doc 04 §3). Implementations must not claim
