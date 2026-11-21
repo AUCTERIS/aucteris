@@ -583,6 +583,9 @@ impl Shell {
             } => {
                 let used = input.saturating_add(output);
                 self.workspace.tokens_used = self.workspace.tokens_used.saturating_add(used);
+                if let Some(limit) = context_limit {
+                    self.workspace.tokens_cap = limit;
+                }
                 if let Some(bot) = bot_id.and_then(|id| self.workspace.bot_mut(id)) {
                     bot.tokens = bot.tokens.saturating_add(used);
                     if let Some(limit) = context_limit {
@@ -591,6 +594,7 @@ impl Shell {
                 }
             }
             Action::ContextWindow { limit } => {
+                self.workspace.tokens_cap = limit;
                 if let Some(bot) = bot_id.and_then(|id| self.workspace.bot_mut(id)) {
                     bot.context_limit = Some(limit);
                 }

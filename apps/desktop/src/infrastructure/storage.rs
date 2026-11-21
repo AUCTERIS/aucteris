@@ -275,7 +275,7 @@ impl From<PersistedWorkspace> for Workspace {
             chats,
             selected,
             tokens_used: value.tokens_used,
-            tokens_cap: value.tokens_cap.max(1),
+            tokens_cap: value.tokens_cap,
         }
     }
 }

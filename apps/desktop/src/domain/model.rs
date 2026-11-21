@@ -516,7 +516,9 @@ impl Workspace {
             chats: Vec::new(),
             selected: 0,
             tokens_used: 0,
-            tokens_cap: 2_000_000,
+            // 0 = unknown until a runtime reports its model's window;
+            // Action::Usage/ContextWindow overwrite it with the real cap.
+            tokens_cap: 0,
         }
     }
 }
