@@ -1,24 +1,52 @@
-name: Rust workspace
+name: ci
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  check:
+  rust:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
-          components: rustfmt
-      - uses: Swatinem/rust-cache@v2
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Install native build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y protobuf-compiler libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-dev libxcb1-dev libx11-xcb-dev libfontconfig1-dev libfreetype-dev libasound2-dev libvulkan-dev libdbus-1-dev pkg-config cmake
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2
+        with:
+          tool: cargo-nextest
       - name: Check formatting
         run: cargo fmt --all -- --check
-      - name: Check workspace
-        run: cargo check --workspace --all-targets
+      - name: Lint workspace
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test workspace
+        run: cargo nextest run --workspace
+      - name: Test doctests
+        run: cargo test --workspace --doc
+
+  deny:
+    # Supply-chain gate: RustSec advisories, license allow-list, duplicate
+    # and wildcard bans, and git/registry source policy (see deny.toml).
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2
