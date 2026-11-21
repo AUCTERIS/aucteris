@@ -12,7 +12,7 @@ use std::{
 /// What an adapter can actually enforce/expose. Reported honestly.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdapterCapabilities {
-    /// Can Aucteris intercept/mediate every tool call? (level 3, doc 04 §4)
+    /// Can Aucteris intercept/mediate every tool call? (level 3, aucteris-architecture 04-AGENT-RUNTIME-AND-INTEGRATION §4)
     pub mediated_tools: bool,
     /// Can the engine cancel a running session and verify termination?
     pub cancellable: bool,
@@ -236,7 +236,7 @@ pub struct RunOutcome {
     pub session_id: Option<String>,
 }
 
-/// The adapter contract (doc 04 §3). Implementations must not claim
+/// The adapter contract (aucteris-architecture 04-AGENT-RUNTIME-AND-INTEGRATION §3). Implementations must not claim
 /// capabilities the underlying runtime cannot enforce.
 pub trait RuntimeAdapter: Send + Sync {
     /// Stable identifier used in mission specs and attempt records.

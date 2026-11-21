@@ -9,8 +9,9 @@
 //!   missions/<id>/workspace/          (agent working directory)
 //!
 //! This is deliberately a thin JSON store — NOT the final persistence
-//! design (doc 08 §3 stays open; Restate is the orchestration candidate
-//! per ADR-0003). It exists to make the slice's recovery semantics real.
+//! design (aucteris-architecture 08-STATE-AND-RECOVERY §3 stays open;
+//! Restate is the orchestration candidate per ADR-0003). It exists to make
+//! the slice's recovery semantics real.
 
 use crate::domain::*;
 use anyhow::{Context, Result};

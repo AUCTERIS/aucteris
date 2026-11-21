@@ -6,7 +6,7 @@
 //!
 //! Recovery: on entry, any Attempt still marked Running means the engine
 //! died mid-flight. We mark it Unknown — we do NOT assume success or
-//! failure, and we do NOT silently retry (doc 08 §5).
+//! failure, and we do NOT silently retry (aucteris-architecture 08-STATE-AND-RECOVERY §5).
 
 use crate::application::ports::runtime::{
     ApprovalDecision, ApprovalHandler, ApprovalRequest, RunRequest, RuntimeEvent, RuntimeRegistry,
@@ -610,7 +610,7 @@ impl<'a> Executor<'a> {
             spec.id, mission.id, mission.objective, spec.title, spec.prompt
         );
 
-        // Declare what this runtime can actually enforce (doc 04 §3).
+        // Declare what this runtime can actually enforce (aucteris-architecture 04-AGENT-RUNTIME-AND-INTEGRATION §3).
         let adapter = self.runtimes.get(&spec.runtime)?;
         let caps = adapter.capabilities();
 
