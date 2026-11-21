@@ -25,7 +25,7 @@ use komet_proto::{
 use std::io::Write;
 use std::sync::{
     Arc,
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
@@ -135,14 +135,26 @@ impl HarnessMissionAdapter {
         }
 
         // Cancellation: the engine's global cancel signal (Ctrl+C path)
-        // maps onto the harness interrupt token.
+        // maps onto the harness interrupt token. `done` lets the poller
+        // exit when the run ends — without it one thread leaks per attempt.
         let interrupt = CancellationToken::new();
+        let cancel_done = Arc::new(AtomicBool::new(false));
+        // Drop guard: every exit path (including `?` on stream/write errors)
+        // releases the poller thread.
+        struct DoneOnDrop(Arc<AtomicBool>);
+        impl Drop for DoneOnDrop {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let _cancel_guard = DoneOnDrop(cancel_done.clone());
         {
             let token = interrupt.clone();
+            let done = cancel_done.clone();
             std::thread::spawn(move || {
-                loop {
+                while !done.load(Ordering::SeqCst) {
                     if aucteris_core::infrastructure::process::CANCEL_REQUESTED
-                        .load(std::sync::atomic::Ordering::SeqCst)
+                        .load(Ordering::SeqCst)
                     {
                         token.cancel();
                         break;
