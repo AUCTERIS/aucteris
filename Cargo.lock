@@ -537,6 +537,7 @@ dependencies = [
  "anyhow",
  "aucteris-core",
  "aucteris-harness",
+ "chrono",
  "futures",
  "gpui",
  "gpui_platform",

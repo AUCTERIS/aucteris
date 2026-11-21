@@ -56,6 +56,9 @@ struct PersistedBot {
     folder: String,
     instructions: String,
     tokens: u64,
+    /// Absent in files written before context limits were tracked.
+    #[serde(default)]
+    context_limit: Option<u64>,
     /// Absent in files written before sandbox levels existed: those bots ran
     /// with everything allowed, so that is what they keep.
     #[serde(default = "full_access")]
@@ -249,6 +252,7 @@ impl From<PersistedWorkspace> for Workspace {
                 folder: bot.folder.into(),
                 instructions: bot.instructions.into(),
                 tokens: bot.tokens,
+                context_limit: bot.context_limit,
                 sandbox: bot.sandbox,
             })
             .collect();
@@ -276,6 +280,7 @@ impl From<&Bot> for PersistedBot {
             folder: bot.folder.to_string(),
             instructions: bot.instructions.to_string(),
             tokens: bot.tokens,
+            context_limit: bot.context_limit,
             sandbox: bot.sandbox,
         }
     }
@@ -566,6 +571,7 @@ mod tests {
             folder: "/tmp".into(),
             instructions: String::new().into(),
             tokens: 0,
+            context_limit: None,
             sandbox: SandboxLevel::DangerFullAccess,
         });
         workspace.chats.push(Chat {

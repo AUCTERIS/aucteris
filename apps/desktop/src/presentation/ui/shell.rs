@@ -159,7 +159,7 @@ impl Shell {
             } else {
                 format!("{} bots in this team", members.len()).into()
             },
-            time: "now".into(),
+            time: model::timestamp_now(),
             session_id: None,
         });
         self.workspace.selected = self.workspace.chats.len() - 1;
@@ -280,7 +280,7 @@ impl Shell {
                     author: Author::You,
                     bot: None,
                     parts: vec![Part::Text(prompt)],
-                    time: "now".into(),
+                    time: model::timestamp_now(),
                     streaming: false,
                     stopped: false,
                 });
@@ -296,7 +296,7 @@ impl Shell {
                 parts: vec![Part::Text(
                     "No bot in this room can answer — add one first.".to_string(),
                 )],
-                time: "now".into(),
+                time: model::timestamp_now(),
                 streaming: false,
                 stopped: false,
             });
@@ -324,7 +324,7 @@ impl Shell {
                 parts: vec![Part::Text(format!(
                     "Run failed: {label} is not installed or not on PATH."
                 ))],
-                time: "now".into(),
+                time: model::timestamp_now(),
                 streaming: false,
                 stopped: false,
             });
@@ -340,7 +340,7 @@ impl Shell {
             author: Author::You,
             bot: None,
             parts: vec![Part::Text(prompt.clone())],
-            time: "now".into(),
+            time: model::timestamp_now(),
             streaming: false,
             stopped: false,
         });
@@ -348,7 +348,7 @@ impl Shell {
             author: Author::Bot,
             bot: Some(bot_id),
             parts: Vec::new(),
-            time: "now".into(),
+            time: model::timestamp_now(),
             streaming: true,
             stopped: false,
         });
@@ -576,11 +576,23 @@ impl Shell {
                     message.push_text(&format!("\n\n{text}"));
                 }
             }
-            Action::Usage { input, output } => {
+            Action::Usage {
+                input,
+                output,
+                context_limit,
+            } => {
                 let used = input.saturating_add(output);
                 self.workspace.tokens_used = self.workspace.tokens_used.saturating_add(used);
                 if let Some(bot) = bot_id.and_then(|id| self.workspace.bot_mut(id)) {
                     bot.tokens = bot.tokens.saturating_add(used);
+                    if let Some(limit) = context_limit {
+                        bot.context_limit = Some(limit);
+                    }
+                }
+            }
+            Action::ContextWindow { limit } => {
+                if let Some(bot) = bot_id.and_then(|id| self.workspace.bot_mut(id)) {
+                    bot.context_limit = Some(limit);
                 }
             }
         }
