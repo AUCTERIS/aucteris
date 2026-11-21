@@ -11,10 +11,7 @@ use gpui::SharedString;
 /// shortcut: day-level grouping ("Yesterday", dates) needs a structured
 /// timestamp on Chat/Message, upgrade when the list outgrows a day.
 pub fn timestamp_now() -> SharedString {
-    chrono::Local::now()
-        .format("%H:%M")
-        .to_string()
-        .into()
+    chrono::Local::now().format("%H:%M").to_string().into()
 }
 
 /// How a sandbox level reads in a row or a status strip.

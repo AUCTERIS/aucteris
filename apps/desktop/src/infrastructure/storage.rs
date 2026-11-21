@@ -652,9 +652,7 @@ mod tests {
         let workspace = workspace_with_parts(all_parts());
         let expected = format!("{:?}", workspace.chats[0].messages[0].parts);
 
-        storage
-            .save(&workspace, &Settings::default())
-            .unwrap();
+        storage.save(&workspace, &Settings::default()).unwrap();
         let (loaded, _) = storage.load();
 
         assert_eq!(format!("{:?}", loaded.chats[0].messages[0].parts), expected);
