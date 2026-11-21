@@ -98,12 +98,19 @@ impl Harness for CliBackend {
         // The file appears at spawn time; poll briefly so a cancel that
         // lands mid-spawn still reaches the child.
         let interrupted = Arc::new(AtomicBool::new(false));
+        // Signals the interrupt watcher to exit when the run finishes —
+        // without it one pending task leaks per chat run.
+        let run_done = Arc::new(tokio::sync::Notify::new());
         {
             let flag = interrupted.clone();
             let pid_file = pid_file.clone();
             let token = controls.interrupt.clone();
+            let done = run_done.clone();
             tokio::spawn(async move {
-                token.cancelled().await;
+                tokio::select! {
+                    _ = token.cancelled() => {}
+                    _ = done.notified() => return,
+                }
                 flag.store(true, Ordering::SeqCst);
                 for _ in 0..100 {
                     if let Ok(raw) = std::fs::read_to_string(&pid_file)
@@ -195,6 +202,7 @@ impl Harness for CliBackend {
                     }));
                 }
             }
+            run_done.notify_one();
         });
 
         let stream = futures::stream::unfold(rx, |mut rx| async move {
