@@ -1,0 +1,81 @@
+# cargo-deny policy — supply-chain gate run in CI (ci.yml `deny` job).
+# Docs: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# Check the crates actually reachable from workspace members, all targets
+# so platform-gated deps (wayland/x11/…) are covered too.
+all-features = false
+
+[advisories]
+version = 2
+# A yanked crate in the tree is a supply-chain smell; treat as an error.
+yanked = "deny"
+
+# Accepted risks — each entry MUST carry its reason and an upgrade path.
+# Re-evaluate on every dependency bump; remove as soon as upstream fixes land.
+ignore = [
+    # rsa 0.9.10 via jsonwebtoken <- restate-sdk. Timing side-channel
+    # (RUSTSEC-2023-0071); rsa 0.10 fixes it but jsonwebtoken pins ^0.9.
+    # Upgrade blocked upstream: restate-sdk -> jsonwebtoken -> rsa.
+    "RUSTSEC-2023-0071",
+    # crypto-bigint 0.5.5 via elliptic-curve <- jsonwebtoken <- restate-sdk.
+    # Constant-time issues (RUSTSEC-2026-0387); fixed in 0.7.6, but
+    # elliptic-curve 0.13 pins crypto-bigint ^0.5.
+    "RUSTSEC-2026-0387",
+    # chrono 0.4 is flagged unmaintained (RUSTSEC-2026-0543). No safe
+    # upgrade; chrono is also pulled by gpui/temporalio transitively, so
+    # removal is not possible today. Migration target: jiff — tracked as
+    # future work, not a blocker for local-first use.
+    "RUSTSEC-2026-0543",
+]
+
+[bans]
+# Duplicate versions are common through the gpui/komet git trees; warn
+# instead of failing until the tree is deduplicated upstream.
+multiple-versions = "warn"
+# `.workspace = true` deps (path crates, rev-pinned git forks) have no
+# semver req by design — they are pinned stronger than a version string.
+wildcards = "warn"
+highlight = "all"
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "ISC",
+    "Zlib",
+    "bzip2-1.0.6",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "MPL-2.0",
+    "CC0-1.0",
+    "OpenSSL",
+    "CDLA-Permissive-2.0",
+    # ⚠️ ACCEPTED RISK (temporary, user decision 2026-11-21):
+    # zlog (GPL-3.0-or-later) enters via gpui -> sum_tree -> ztracing -> zlog
+    # in the jomvick/zed fork. An Apache-2.0 product statically linking GPL
+    # code may inherit copyleft obligations on distribution. MUST be
+    # resolved before any public binary release: relicense or drop zlog in
+    # the zed fork. Tracked as a Phase 0/1 follow-up.
+    "GPL-3.0-or-later",
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = [
+    # Forks pinned by rev in workspace Cargo.toml — see ADR-0001 and the
+    # supply-chain note in the Phase 0 review (bus-factor risk tracked).
+    "https://github.com/jomvick/zed",
+    "https://github.com/jomvick/komet",
+    "https://github.com/zed-industries/font-kit",
+    "https://github.com/zed-industries/scap",
+    "https://github.com/zed-industries/xim-rs",
+]

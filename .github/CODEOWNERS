@@ -1,0 +1,3 @@
+# Review routing — every change needs an owner approval (enforced via
+# branch protection on main).
+* @jomvick @NICE-DEV226

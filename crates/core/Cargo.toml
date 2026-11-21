@@ -8,7 +8,6 @@ publish = false
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
-ctrlc.workspace = true
 futures.workspace = true
 futures-util.workspace = true
 libc.workspace = true
@@ -16,7 +15,6 @@ reqwest.workspace = true
 restate-sdk.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-serde_yaml.workspace = true
 temporalio-client.workspace = true
 temporalio-common.workspace = true
 temporalio-macros.workspace = true
@@ -24,7 +22,13 @@ temporalio-sdk.workspace = true
 temporalio-workflow.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-tracing-subscriber.workspace = true
+
+# futures and temporalio-common/workflow have no direct `use` in our sources
+# but are referenced by code generated from #[activities]/#[workflow] macros
+# — cargo-machete cannot see macro-expanded paths.
+[package.metadata.cargo-machete]
+ignored = ["futures", "temporalio-common", "temporalio-workflow"]
 
 [dev-dependencies]
+serde_yaml.workspace = true
 tempfile = "3"

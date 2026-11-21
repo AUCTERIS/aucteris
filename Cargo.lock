@@ -496,7 +496,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "aucteris-core",
- "chrono",
  "ctrlc",
  "libc",
  "serde_yaml",
@@ -510,7 +509,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "ctrlc",
  "futures",
  "futures-util",
  "libc",
@@ -527,7 +525,6 @@ dependencies = [
  "temporalio-workflow",
  "tokio",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -537,7 +534,6 @@ dependencies = [
  "anyhow",
  "aucteris-core",
  "aucteris-harness",
- "futures",
  "gpui",
  "gpui_platform",
  "image",
@@ -559,7 +555,6 @@ dependencies = [
  "komet-harness",
  "komet-proto",
  "libc",
- "serde",
  "serde_json",
  "tokio",
 ]

@@ -7,3 +7,6 @@ aucteris-data/
 
 /crates/core/Cargo.lock
 /apps/desktop/Cargo.lock
+
+# cargo-cyclonedx output
+*.cdx.json
