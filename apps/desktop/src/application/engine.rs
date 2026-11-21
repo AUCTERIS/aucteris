@@ -19,7 +19,7 @@ pub struct AgentCli {
     pub icon: &'static str,
 }
 
-pub const SUPPORTED: [AgentCli; 5] = [
+pub const SUPPORTED: [AgentCli; 6] = [
     AgentCli {
         id: "claude-code",
         label: "Claude Code",
@@ -54,6 +54,13 @@ pub const SUPPORTED: [AgentCli; 5] = [
         executable: "devin",
         provider: "Devin",
         icon: "devin-mark",
+    },
+    AgentCli {
+        id: "grok",
+        label: "Grok CLI",
+        executable: "grok",
+        provider: "xAI",
+        icon: "grok-mark",
     },
 ];
 

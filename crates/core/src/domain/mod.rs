@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-// ---------- Lifecycle enums (kept separate per doc 02 §5) ----------
+// ---------- Lifecycle enums (kept separate per aucteris-architecture 02-DOMAIN-MODEL §5) ----------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -217,7 +217,7 @@ pub struct Attempt {
     pub session_id: Option<String>,
 }
 
-/// Evidence categories per doc 09 §2 — the distinction is the product.
+/// Evidence categories per aucteris-architecture 09-EVIDENCE-AND-OBSERVABILITY §2 — the distinction is the product.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Evidence {

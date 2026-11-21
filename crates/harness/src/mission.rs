@@ -20,19 +20,21 @@ use aucteris_core::sandbox::SandboxMounts;
 use futures::StreamExt;
 use komet_harness::{CancellationToken, Harness, SteerMessage};
 use komet_proto::{
-    AgentEvent, DoneStatus, PermissionChoice, RunRequest as KometRunRequest, SandboxLevel, Scope,
+    AgentEvent, DoneStatus, McpServerConfig, McpTransport, PermissionChoice, ResolvedMcpServer,
+    RunRequest as KometRunRequest, SandboxLevel, Scope,
 };
+use std::collections::HashMap;
 use std::io::Write;
 use std::sync::{
     Arc,
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
 /// Mission runtime name → komet harness, for the runtimes core missions
 /// already know. Anything else stays on the supervised CLI adapters.
-const SESSION_RUNTIMES: &[&str] = &["claude-code", "codex", "opencode", "devin"];
+const SESSION_RUNTIMES: &[&str] = &["claude-code", "codex", "opencode", "devin", "grok"];
 
 /// Register harness-backed adapters for every runtime komet can drive.
 /// This REPLACES the supervised CLI adapters of the same name in the
@@ -89,6 +91,10 @@ impl RuntimeAdapter for HarnessMissionAdapter {
         SandboxMounts::default()
     }
 
+    fn supports_mcp(&self) -> bool {
+        true
+    }
+
     fn run(&self, req: RunRequest) -> Result<RunOutcome> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -135,14 +141,26 @@ impl HarnessMissionAdapter {
         }
 
         // Cancellation: the engine's global cancel signal (Ctrl+C path)
-        // maps onto the harness interrupt token.
+        // maps onto the harness interrupt token. `done` lets the poller
+        // exit when the run ends — without it one thread leaks per attempt.
         let interrupt = CancellationToken::new();
+        let cancel_done = Arc::new(AtomicBool::new(false));
+        // Drop guard: every exit path (including `?` on stream/write errors)
+        // releases the poller thread.
+        struct DoneOnDrop(Arc<AtomicBool>);
+        impl Drop for DoneOnDrop {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let _cancel_guard = DoneOnDrop(cancel_done.clone());
         {
             let token = interrupt.clone();
+            let done = cancel_done.clone();
             std::thread::spawn(move || {
-                loop {
+                while !done.load(Ordering::SeqCst) {
                     if aucteris_core::infrastructure::process::CANCEL_REQUESTED
-                        .load(std::sync::atomic::Ordering::SeqCst)
+                        .load(Ordering::SeqCst)
                     {
                         token.cancel();
                         break;
@@ -167,6 +185,32 @@ impl HarnessMissionAdapter {
             env: Vec::new(),
         };
 
+        // Engine MCP plan (memory) rides komet's external-server slot as a
+        // stdio server; env/secrets are launch-only, never logged.
+        let mcp_external: Vec<ResolvedMcpServer> = req
+            .mcp
+            .iter()
+            .map(|plan| {
+                let env: HashMap<String, String> = plan.env.iter().cloned().collect();
+                ResolvedMcpServer {
+                    config: McpServerConfig {
+                        id: plan.name.clone(),
+                        name: plan.name.clone(),
+                        enabled: true,
+                        transport: McpTransport::Stdio,
+                        command: Some(plan.command.clone()),
+                        args: Vec::new(),
+                        url: None,
+                        headers: HashMap::new(),
+                        env: env.clone(),
+                        always_load: true,
+                    },
+                    resolved_headers: HashMap::new(),
+                    resolved_env: env,
+                }
+            })
+            .collect();
+
         let komet_req = KometRunRequest {
             prompt: req.prompt.clone(),
             harness: None,
@@ -185,9 +229,9 @@ impl HarnessMissionAdapter {
             attachments: Vec::new(),
             worktree: None,
             permission_timeout_ms: None,
-            use_mcp: false,
+            use_mcp: !mcp_external.is_empty(),
             mcp: None,
-            mcp_external: Vec::new(),
+            mcp_external,
         };
 
         let mut stream = self

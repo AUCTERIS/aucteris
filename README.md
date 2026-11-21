@@ -24,4 +24,4 @@ Agent CLIs use their own local installation and authentication. Aucteris does no
 - `apps/cli` — command-line entry point for mission files, reports, and durable orchestrators.
 - `crates/core` — reusable mission engine, domain, runtime adapters, persistence, sandboxing, and orchestration.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for module responsibilities and dependency rules.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for module responsibilities and dependency rules, [docs/architecture](docs/architecture/README.md) for the implemented vertical slice, and [docs/adr](docs/adr/README.md) for decision records.

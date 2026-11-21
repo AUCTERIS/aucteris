@@ -12,7 +12,7 @@ use gpui::{
     px,
 };
 
-use crate::domain::model::{Bot, Chat, MascotShape, Mode, Presence};
+use crate::domain::model::{Bot, Chat, MascotShape, Mode, Presence, timestamp_now};
 use crate::presentation::theme::{Theme, metrics, text as typo};
 use crate::presentation::ui::shell::Shell;
 use crate::presentation::ui::widgets;
@@ -657,6 +657,7 @@ impl Shell {
             folder: folder.clone().into(),
             instructions: instructions.into(),
             tokens: 0,
+            context_limit: None,
             sandbox: SandboxLevel::WorkspaceWrite,
         });
         self.workspace.chats.push(Chat {
@@ -666,7 +667,7 @@ impl Shell {
             members: Vec::new(),
             messages: Vec::new(),
             preview: "Ready for your first task".into(),
-            time: "now".into(),
+            time: timestamp_now(),
             session_id: None,
         });
         self.workspace.selected = self.workspace.chats.len() - 1;

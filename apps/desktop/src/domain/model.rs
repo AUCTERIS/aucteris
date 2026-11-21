@@ -6,6 +6,14 @@
 use aucteris_harness::komet_proto::SandboxLevel;
 use gpui::SharedString;
 
+/// Sidebar/message timestamp label. `HH:MM` local time — the sidebar shows
+/// the last-activity clock time; there is no date granularity yet.
+/// shortcut: day-level grouping ("Yesterday", dates) needs a structured
+/// timestamp on Chat/Message, upgrade when the list outgrows a day.
+pub fn timestamp_now() -> SharedString {
+    chrono::Local::now().format("%H:%M").to_string().into()
+}
+
 /// How a sandbox level reads in a row or a status strip.
 pub fn sandbox_label(level: SandboxLevel) -> &'static str {
     match level {
@@ -200,6 +208,10 @@ pub struct Bot {
     pub folder: SharedString,
     pub instructions: SharedString,
     pub tokens: u64,
+    /// Last context-window limit the runtime reported for this bot's
+    /// model. `None` until a harness emits one — the usage meter stays
+    /// empty rather than dividing by an invented cap.
+    pub context_limit: Option<u64>,
     /// OS-level confinement this bot runs under. Asked at send time.
     pub sandbox: SandboxLevel,
 }
@@ -492,7 +504,7 @@ impl Workspace {
             let short: String = preview.chars().take(72).collect();
             let chat = self.chat_mut();
             chat.preview = SharedString::from(short);
-            chat.time = SharedString::from("now");
+            chat.time = timestamp_now();
         }
     }
 }
@@ -504,7 +516,9 @@ impl Workspace {
             chats: Vec::new(),
             selected: 0,
             tokens_used: 0,
-            tokens_cap: 2_000_000,
+            // 0 = unknown until a runtime reports its model's window;
+            // Action::Usage/ContextWindow overwrite it with the real cap.
+            tokens_cap: 0,
         }
     }
 }
@@ -538,7 +552,7 @@ impl Mode {
 /// A single bot's settings live in its own panel; these are the few things that
 /// change the whole app, and every one of them does something the moment it
 /// changes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     pub mode: Mode,
     /// Stable CLI runtime id assigned to new bots.

@@ -188,7 +188,12 @@ impl Shell {
             .text_color(theme.ink_secondary)
             .child(bot.instructions.to_string());
 
-        let usage_fraction = (bot.tokens as f32 / 500_000.0).clamp(0.0, 1.0);
+        // Unknown window stays an empty meter: inventing a denominator
+        // would make the bar a lie.
+        let usage_fraction = bot
+            .context_limit
+            .map(|limit| (bot.tokens as f32 / limit.max(1) as f32).clamp(0.0, 1.0))
+            .unwrap_or(0.0);
         let usage = div()
             .flex()
             .flex_col()
