@@ -60,3 +60,48 @@ jobs:
           tool: cargo-deny@0.22.0
       - run: cargo deny check
 
+  hygiene:
+    # Repo/tooling hygiene that has nothing to do with compilation:
+    # workflow lint (actionlint, digest-pinned image) and unused-dependency
+    # detection (cargo-machete, pinned release + hash).
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Lint GitHub Actions workflows
+        run: >-
+          docker run --rm
+          -v "$GITHUB_WORKSPACE:/repo" -w /repo
+          rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+          -color
+      - name: Install cargo-machete
+        uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2
+        with:
+          tool: cargo-machete@0.10.1
+      - name: Detect unused dependencies
+        run: cargo machete
+
+  sbom:
+    # CycloneDX SBOM of the full resolved dependency tree. Generated from
+    # cargo metadata only (no build), so it is cheap enough to run on
+    # every change and doubles as a diff-able dependency manifest.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2
+        with:
+          tool: cargo-cyclonedx@0.5.10
+      - name: Generate CycloneDX SBOMs
+        # One <crate>.cdx.json per workspace member — cargo metadata only,
+        # no build.
+        run: cargo cyclonedx --format json --spec-version 1.5 --all-features
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom-cyclonedx
+          path: "**/*.cdx.json"
+          retention-days: 90
