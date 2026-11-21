@@ -1,0 +1,64 @@
+name: security-triage
+
+# Dependabot/security PR triage performed AS aucteris-security (GitHub App).
+# Read-mostly posture: labels + structured risk comment, never approves.
+# Inert until vars.SECURITY_BOT_ENABLED=true — see
+# AUCTERIS/.github/bots/README.md.
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions: {}
+
+concurrency:
+  group: security-triage-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  triage:
+    name: Triage dependency PRs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: >-
+      vars.SECURITY_BOT_ENABLED == 'true' &&
+      github.actor == 'dependabot[bot]'
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Mint aucteris-security token
+        id: app-token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          app-id: ${{ secrets.AUCTERIS_SECURITY_APP_ID }}
+          private-key: ${{ secrets.AUCTERIS_SECURITY_PRIVATE_KEY }}
+
+      - name: Label and risk-comment
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          gh label create "dependencies" --repo "$REPO" --color 0366D6 --description "Dependency update" 2>/dev/null || true
+          gh label create "security-review" --repo "$REPO" --color B60205 --description "Needs security review" 2>/dev/null || true
+          gh pr edit "$PR" --repo "$REPO" --add-label "dependencies,security-review"
+
+          files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename' | head -20)
+          deps=$(grep -cE 'Cargo\.(toml|lock)$' <<<"$files" || true)
+
+          # cargo-deny gates license/advisory regressions automatically;
+          # the comment makes the residual risk explicit for the reviewer.
+          gh pr comment "$PR" --repo "$REPO" --body "$(cat <<EOF
+          <!-- aucteris-security -->
+          **Dependency PR triage** (automated, read-only posture)
+
+          - Files touched under Cargo manifests/lock: $deps
+          - \`cargo deny check\` will validate licenses, RustSec advisories and source policy — a red \`deny\` check is a hard stop.
+          - Review focus: does this bump cross a \`deny.toml\` allow-list boundary (e.g. new GPL, new git source, new registry)? Grouped bumps deserve a per-crate pass, not a skim.
+          - Known accepted risks live in \`deny.toml\` comments — do not "fix" them here.
+          EOF
+          )"
