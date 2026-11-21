@@ -16,7 +16,7 @@ use crate::domain::model::{Bot, Chat, MascotShape, Mode, Presence};
 use crate::presentation::theme::{Theme, metrics, text as typo};
 use crate::presentation::ui::shell::Shell;
 use crate::presentation::ui::widgets;
-use komet_proto::SandboxLevel;
+use aucteris_harness::komet_proto::SandboxLevel;
 
 /// The four text fields of the new-bot form, in Tab order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -233,10 +233,10 @@ fn provider_choices(engine: &crate::application::engine::Engine) -> Vec<Provider
 }
 
 fn choice_matches(choice: &ProviderChoice, rail: Option<&str>, query: &str) -> bool {
-    if let Some(rail) = rail {
-        if choice.provider != rail {
-            return false;
-        }
+    if let Some(rail) = rail
+        && choice.provider != rail
+    {
+        return false;
     }
     if query.is_empty() {
         return true;
@@ -275,7 +275,7 @@ pub enum PickerHost {
 }
 
 pub enum Dialog {
-    Bot(BotForm),
+    Bot(Box<BotForm>),
     Team(TeamForm),
     Settings(SettingsPage),
 }
@@ -302,7 +302,7 @@ impl Shell {
             .or_else(|| self.available_runtimes.first())
             .map(|cli| cli.id.to_string())
             .unwrap_or_default();
-        self.dialog = Some(Dialog::Bot(BotForm::new(runtime, color, focus)));
+        self.dialog = Some(Dialog::Bot(Box::new(BotForm::new(runtime, color, focus))));
         self.caret_visible = true;
         self.create_menu_open = false;
         self.panel_picker.open = false;
@@ -321,7 +321,7 @@ impl Shell {
             return;
         };
         let focus = Self::form_focuses(cx);
-        self.dialog = Some(Dialog::Bot(BotForm::from_bot(&bot, focus)));
+        self.dialog = Some(Dialog::Bot(Box::new(BotForm::from_bot(&bot, focus))));
         self.caret_visible = true;
         self.create_menu_open = false;
         self.panel_picker.open = false;
@@ -379,16 +379,16 @@ impl Shell {
             prompt: Some("Select working folder".into()),
         });
         cx.spawn_in(window, async move |this, cx| {
-            if let Ok(Ok(Some(mut paths))) = prompt.await {
-                if let Some(path) = paths.pop() {
-                    let path_str = path.to_string_lossy().to_string();
-                    let _ = this.update(cx, |this, cx| {
-                        if let Some(Dialog::Bot(form)) = this.dialog.as_mut() {
-                            form.folder = path_str;
-                            cx.notify();
-                        }
-                    });
-                }
+            if let Ok(Ok(Some(mut paths))) = prompt.await
+                && let Some(path) = paths.pop()
+            {
+                let path_str = path.to_string_lossy().to_string();
+                let _ = this.update(cx, |this, cx| {
+                    if let Some(Dialog::Bot(form)) = this.dialog.as_mut() {
+                        form.folder = path_str;
+                        cx.notify();
+                    }
+                });
             }
         })
         .detach();
@@ -408,12 +408,12 @@ impl Shell {
         self.caret_visible = true;
 
         if key == "escape" {
-            if let Some(Dialog::Bot(form)) = self.dialog.as_mut() {
-                if form.provider.open {
-                    form.provider.open = false;
-                    cx.notify();
-                    return;
-                }
+            if let Some(Dialog::Bot(form)) = self.dialog.as_mut()
+                && form.provider.open
+            {
+                form.provider.open = false;
+                cx.notify();
+                return;
             }
             self.close_dialog(window, cx);
             return;
@@ -459,56 +459,56 @@ impl Shell {
         let mut refocus: Option<Field> = None;
 
         // When the provider dropdown is open, typing filters the models.
-        if let Some(Dialog::Bot(form)) = self.dialog.as_mut() {
-            if form.provider.open {
-                match key {
-                    "tab" => {
-                        form.provider.open = false;
-                        form.active = form.active.next(modifiers.shift);
-                        refocus = Some(form.active);
+        if let Some(Dialog::Bot(form)) = self.dialog.as_mut()
+            && form.provider.open
+        {
+            match key {
+                "tab" => {
+                    form.provider.open = false;
+                    form.active = form.active.next(modifiers.shift);
+                    refocus = Some(form.active);
+                }
+                "backspace" => {
+                    form.provider.search.pop();
+                    form.provider.reset_scroll();
+                    cx.notify();
+                    return;
+                }
+                "enter" => {
+                    let query = form.provider.search.trim().to_lowercase();
+                    let rail_filter = form.provider.rail.as_deref();
+                    if let Some(matched) = provider_choices(&self.engine)
+                        .iter()
+                        .find(|choice| choice_matches(choice, rail_filter, &query))
+                    {
+                        form.runtime = matched.id.clone();
                     }
-                    "backspace" => {
-                        form.provider.search.pop();
+                    form.provider.open = false;
+                    cx.notify();
+                    return;
+                }
+                _ => {
+                    if modifiers.control || modifiers.platform {
+                        return;
+                    }
+                    let typed = event
+                        .keystroke
+                        .key_char
+                        .clone()
+                        .or_else(|| (key == "space").then(|| " ".to_string()))
+                        .or_else(|| (key.chars().count() == 1).then(|| key.to_string()));
+                    if let Some(typed) = typed.filter(|text| !text.is_empty()) {
+                        form.provider.search.push_str(&typed);
                         form.provider.reset_scroll();
                         cx.notify();
                         return;
                     }
-                    "enter" => {
-                        let query = form.provider.search.trim().to_lowercase();
-                        let rail_filter = form.provider.rail.as_deref();
-                        if let Some(matched) = provider_choices(&self.engine)
-                            .iter()
-                            .find(|choice| choice_matches(choice, rail_filter, &query))
-                        {
-                            form.runtime = matched.id.clone();
-                        }
-                        form.provider.open = false;
-                        cx.notify();
-                        return;
-                    }
-                    _ => {
-                        if modifiers.control || modifiers.platform {
-                            return;
-                        }
-                        let typed = event
-                            .keystroke
-                            .key_char
-                            .clone()
-                            .or_else(|| (key == "space").then(|| " ".to_string()))
-                            .or_else(|| (key.chars().count() == 1).then(|| key.to_string()));
-                        if let Some(typed) = typed.filter(|text| !text.is_empty()) {
-                            form.provider.search.push_str(&typed);
-                            form.provider.reset_scroll();
-                            cx.notify();
-                            return;
-                        }
-                    }
                 }
-                if let Some(field) = refocus {
-                    self.focus_field(field, window, cx);
-                }
-                return;
             }
+            if let Some(field) = refocus {
+                self.focus_field(field, window, cx);
+            }
+            return;
         }
 
         let mut submit = false;
@@ -2341,7 +2341,10 @@ pub(crate) fn caret_spans(
     if !value.is_empty() {
         text.push('|');
     }
-    (text, vec![caret_at..caret_at + 1])
+    (
+        text,
+        std::iter::once(caret_at..caret_at + 1).collect::<Vec<Range<usize>>>(),
+    )
 }
 
 #[cfg(test)]

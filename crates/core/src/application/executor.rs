@@ -8,12 +8,205 @@
 //! died mid-flight. We mark it Unknown — we do NOT assume success or
 //! failure, and we do NOT silently retry (doc 08 §5).
 
-use crate::application::ports::runtime::{RunRequest, RuntimeEvent, RuntimeRegistry};
+use crate::application::ports::runtime::{
+    ApprovalDecision, ApprovalHandler, ApprovalRequest, RunRequest, RuntimeEvent, RuntimeRegistry,
+    SteerInbox,
+};
 use crate::domain::*;
 use crate::infrastructure::{process, store::Store};
 use anyhow::Result;
-use std::time::Instant;
-use std::{process::Command, sync::Arc};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    process::Command,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
+
+/// Live steer channels for in-flight attempts, keyed by `mission:task`.
+/// One task runs at most one attempt at a time, so the task key is the
+/// stable handle (`AucterisCore::steer` does not need attempt ids — the
+/// in-flight attempt is not yet recorded in `state.json` anyway).
+static STEER_SINKS: Mutex<Option<HashMap<String, std::sync::mpsc::Sender<String>>>> =
+    Mutex::new(None);
+
+fn steer_sinks()
+-> std::sync::MutexGuard<'static, Option<HashMap<String, std::sync::mpsc::Sender<String>>>> {
+    STEER_SINKS.lock().expect("steer sinks poisoned")
+}
+
+/// Deliver an operator steer prompt to a running task. `false` when the
+/// task has no live channel (finished, not started, or a runtime without
+/// steering support).
+pub fn steer_task(mission_id: &str, task_id: &str, text: &str) -> bool {
+    let key = format!("{mission_id}:{task_id}");
+    let sinks = steer_sinks();
+    sinks
+        .as_ref()
+        .and_then(|map| map.get(&key))
+        .map(|tx| tx.send(text.to_string()).is_ok())
+        .unwrap_or(false)
+}
+
+/// File gate for per-tool approvals (`MissionSpec::tool_approval`).
+/// Pending requests live in `<mission>/approvals/`; an operator resolves
+/// them via [`resolve_tool_approval`]. Unanswered requests deny on
+/// timeout — a stalled agent is worse than a refused tool call.
+const TOOL_APPROVAL_TIMEOUT: Duration = Duration::from_secs(600);
+const TOOL_APPROVAL_POLL: Duration = Duration::from_millis(250);
+
+fn approvals_dir(store: &Store, mission_id: &str) -> PathBuf {
+    store.mission_dir(mission_id).join("approvals")
+}
+
+fn sanitize_request_id(raw: &str) -> String {
+    raw.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn tool_approval_gate(store: &Store, mission_id: &str, attempt_id: &str) -> ApprovalHandler {
+    let dir = approvals_dir(store, mission_id);
+    let _ = std::fs::create_dir_all(&dir);
+    let attempt_id = attempt_id.to_string();
+    let seq = Arc::new(AtomicU64::new(1));
+    Arc::new(move |req: ApprovalRequest| {
+        let base = if req.request_id.trim().is_empty() {
+            format!("{}-{}", attempt_id, seq.fetch_add(1, Ordering::Relaxed))
+        } else {
+            req.request_id.clone()
+        };
+        let rid = sanitize_request_id(&base);
+        let pending_path = dir.join(format!("{rid}.json"));
+        let record = serde_json::json!({
+            "request_id": rid,
+            "attempt_id": attempt_id,
+            "status": "pending",
+            "kind": req.kind,
+            "summary": req.summary,
+            "choices": req.choices,
+            "tool_call_id": req.tool_call_id,
+            "created_at": chrono::Utc::now().to_rfc3339(),
+        });
+        if std::fs::write(
+            &pending_path,
+            serde_json::to_string_pretty(&record).unwrap_or_default(),
+        )
+        .is_err()
+        {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let _ = tx.send(ApprovalDecision::Deny);
+            return rx;
+        }
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let dir2 = dir.clone();
+        let rid2 = rid.clone();
+        std::thread::spawn(move || {
+            let deadline = Instant::now() + TOOL_APPROVAL_TIMEOUT;
+            loop {
+                if let Ok(raw) = std::fs::read_to_string(dir2.join(format!("{rid2}.decision.json")))
+                    && let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw)
+                {
+                    let decision = match v.get("decision").and_then(|d| d.as_str()) {
+                        Some("allow_always") => ApprovalDecision::AllowAlways,
+                        Some("allow") => ApprovalDecision::Allow,
+                        _ => ApprovalDecision::Deny,
+                    };
+                    let _ = tx.send(decision);
+                    return;
+                }
+                if Instant::now() >= deadline {
+                    let _ = tx.send(ApprovalDecision::Deny);
+                    return;
+                }
+                std::thread::sleep(TOOL_APPROVAL_POLL);
+            }
+        });
+        rx
+    })
+}
+
+/// Resolve a pending per-tool approval. `decision` is "allow",
+/// "allow_always" or "deny". Returns false when no pending request with
+/// that id exists (already resolved, timed out, or unknown).
+pub fn resolve_tool_approval(
+    store: &Store,
+    mission_id: &str,
+    request_id: &str,
+    decision: &str,
+) -> Result<bool> {
+    let rid = sanitize_request_id(request_id);
+    let dir = approvals_dir(store, mission_id);
+    let pending_path = dir.join(format!("{rid}.json"));
+    let decision_path = dir.join(format!("{rid}.decision.json"));
+    if decision_path.exists() || !pending_path.exists() {
+        return Ok(false);
+    }
+    let record = serde_json::json!({
+        "decision": decision,
+        "resolved_at": chrono::Utc::now().to_rfc3339(),
+    });
+    std::fs::write(&decision_path, serde_json::to_string_pretty(&record)?)?;
+    let summary = std::fs::read_to_string(&pending_path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|v| {
+            v.get("summary")
+                .and_then(|s| s.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_default();
+    store.append_evidence(
+        mission_id,
+        &Evidence::SystemObservation {
+            detail: format!("tool approval {rid} resolved by operator: {decision} ({summary})"),
+        },
+    )?;
+    Ok(true)
+}
+
+/// Pending per-tool approval requests for a mission (for CLI/UI listing).
+pub fn pending_tool_approvals(store: &Store, mission_id: &str) -> Vec<serde_json::Value> {
+    let dir = approvals_dir(store, mission_id);
+    let mut out = vec![];
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.ends_with(".json") || name.ends_with(".decision.json") {
+            continue;
+        }
+        if entry
+            .path()
+            .with_file_name(format!("{}.decision.json", name.trim_end_matches(".json")))
+            .exists()
+        {
+            continue;
+        }
+        if let Ok(raw) = std::fs::read_to_string(entry.path())
+            && let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw)
+        {
+            out.push(v);
+        }
+    }
+    out.sort_by(|a, b| {
+        a.get("created_at")
+            .and_then(|t| t.as_str())
+            .cmp(&b.get("created_at").and_then(|t| t.as_str()))
+    });
+    out
+}
 
 /// One normalized runtime event, tagged with the work item that emitted it.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -226,8 +419,11 @@ impl<'a> Executor<'a> {
                     .iter()
                     .map(|&i| {
                         let spec = &m.tasks[i];
+                        // Resume the agent session the task's previous
+                        // attempt reported, when the runtime supports it.
+                        let resume = state[i].session_id.clone();
                         s.spawn(move || {
-                            let attempt = self.execute_attempt(m, spec)?;
+                            let attempt = self.execute_attempt(m, spec, resume)?;
                             let verified = attempt.status == AttemptStatus::Succeeded
                                 && self.verify_task(m, spec)?;
                             Ok::<(usize, Attempt, bool), anyhow::Error>((i, attempt, verified))
@@ -269,6 +465,9 @@ impl<'a> Executor<'a> {
 
             for (i, attempt, verified) in results {
                 state[i].attempts.push(attempt.id.clone());
+                if let Some(session_id) = &attempt.session_id {
+                    state[i].session_id = Some(session_id.clone());
+                }
                 state[i].status = if verified {
                     TaskStatus::Completed
                 } else {
@@ -358,7 +557,12 @@ impl<'a> Executor<'a> {
         }
     }
 
-    pub(crate) fn execute_attempt(&self, mission: &Mission, spec: &TaskSpec) -> Result<Attempt> {
+    pub(crate) fn execute_attempt(
+        &self,
+        mission: &Mission,
+        spec: &TaskSpec,
+        resume_session: Option<String>,
+    ) -> Result<Attempt> {
         // Attempt ids must be unique even for same-second parallel
         // retries — same collision class as the mission-id bug.
         let base_id = format!("a-{}-{}", spec.id, chrono::Utc::now().format("%H%M%S"));
@@ -384,6 +588,7 @@ impl<'a> Executor<'a> {
             isolation: None,
             limitations: vec![],
             pid: None,
+            session_id: None,
         };
         // Persist BEFORE spawning: a crash now leaves an honest Running record.
         self.store.save_attempt(&mission.id, &attempt)?;
@@ -506,6 +711,34 @@ impl<'a> Executor<'a> {
             .join("attempts")
             .join(format!("{}.pid", attempt_id));
 
+        // Interactions: per-tool approvals ride the mission's file gate
+        // when the spec opted in AND the adapter can mediate tool calls.
+        // Otherwise the adapter applies its own policy — recorded.
+        let interactions = if mission.tool_approval {
+            if caps.mediated_tools {
+                Some(tool_approval_gate(self.store, &mission.id, &attempt_id))
+            } else {
+                attempt
+                    .limitations
+                    .push("tool_approval requested but adapter does not mediate tool calls".into());
+                None
+            }
+        } else {
+            None
+        };
+
+        // Steering: every attempt gets an inbox keyed by mission:task;
+        // `AucterisCore::steer` delivers prompts through it. Adapters
+        // without steering support simply never drain it.
+        let (steer_inbox, steer_tx) = SteerInbox::pair();
+        let steer_key = format!("{}:{}", mission.id, spec.id);
+        {
+            let mut sinks = steer_sinks();
+            sinks
+                .get_or_insert_with(HashMap::new)
+                .insert(steer_key.clone(), steer_tx);
+        }
+
         let start = Instant::now();
         let event_sink = self.event_sink.as_ref().map(|sink| {
             let sink = Arc::clone(sink);
@@ -534,7 +767,15 @@ impl<'a> Executor<'a> {
             egress_filter,
             mcp: mcp_plan,
             event_sink,
+            resume_session,
+            interactions,
+            steering: Some(steer_inbox),
         });
+        // The attempt is over: drop its steer channel so late prompts
+        // report "not running" instead of queueing into the void.
+        if let Some(map) = steer_sinks().as_mut() {
+            map.remove(&steer_key);
+        }
         let elapsed = start.elapsed().as_secs();
 
         match outcome {
@@ -548,6 +789,7 @@ impl<'a> Executor<'a> {
                 attempt.tool_calls = o.tool_calls;
                 attempt.agent_assertion = o.agent_assertion.clone();
                 attempt.pid = o.pid;
+                attempt.session_id = o.session_id.clone();
                 attempt.ended_at = Some(chrono::Utc::now().to_rfc3339());
 
                 self.store.append_evidence(

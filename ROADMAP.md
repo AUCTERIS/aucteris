@@ -38,17 +38,17 @@ core, sans service distant.
 
 La plus grosse dette avant d'ajouter des features. Suivi global : [#2](https://github.com/AUCTERIS/aucteris/issues/2).
 
-- [ ] **Unifier les chemins d'exécution**
+- [x] **Unifier les chemins d'exécution**
       ([#3](https://github.com/AUCTERIS/aucteris/issues/3)) — une seule couche runtime
       pour les chats et les missions ; les missions obtiennent sessions persistantes,
       approvals et steering ; gemini ne requiert plus de chemin dédié ; ADR de décision
       requis.
-- [ ] **Persistance fidèle**
+- [x] **Persistance fidèle**
       ([#4](https://github.com/AUCTERIS/aucteris/issues/4)) — sérialiser les `Part`
       riches (Approval, Question, Tool, Files, Thought) sans aplatissement en texte,
       avec migration douce du format existant
       ([apps/desktop/src/infrastructure/storage.rs](apps/desktop/src/infrastructure/storage.rs)).
-- [ ] **CI réelle** ([#5](https://github.com/AUCTERIS/aucteris/issues/5)) —
+- [x] **CI réelle** ([#5](https://github.com/AUCTERIS/aucteris/issues/5)) —
       `cargo test --workspace` + `cargo clippy -D warnings` dans la CI ; transformer les
       3 fixtures mock orphelines (`crates/core/tests/fixtures/`) en tests d'intégration
       réels ; couvrir `executor.rs` et l'orchestrator `local`.
@@ -67,7 +67,7 @@ d'empiler des features.
 
 **Refacto**
 
-- [ ] **Extraire la couche runtime/session en crate dédié** (`crates/harness`) — le
+- [x] **Extraire la couche runtime/session en crate dédié** (`crates/harness`) — le
       desktop ne dépend plus directement de komet-harness ; API interne stable
       (RunControls, événements, approvals, questions). S'appuie sur #3.
 - [ ] **Découper les fichiers monolithiques** :

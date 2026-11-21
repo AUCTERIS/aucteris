@@ -136,12 +136,13 @@ pub fn wrap_argv(plan: &SandboxPlan, program: &str, args: &[String]) -> Result<V
     // the link dangles inside and every runtime loses name resolution.
     // Re-bind the resolved file at its canonical location — the netns
     // is shared, so a 127.0.0.53 stub still reaches the host resolver.
-    if let Ok(resolv) = std::fs::canonicalize("/etc/resolv.conf") {
-        if resolv.starts_with("/run") && resolv.is_file() {
-            argv.push("--ro-bind".into());
-            argv.push(resolv.display().to_string());
-            argv.push(resolv.display().to_string());
-        }
+    if let Ok(resolv) = std::fs::canonicalize("/etc/resolv.conf")
+        && resolv.starts_with("/run")
+        && resolv.is_file()
+    {
+        argv.push("--ro-bind".into());
+        argv.push(resolv.display().to_string());
+        argv.push(resolv.display().to_string());
     }
     for d in &plan.mounts.rw_dirs {
         if let Some(dir) = host_dir(d) {

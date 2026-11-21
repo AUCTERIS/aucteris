@@ -15,7 +15,7 @@ use crate::domain::model::{self, Author, Message, Part, Presence, Settings, Work
 use crate::infrastructure::storage::AppStorage;
 use crate::presentation::theme::{Appearance, Theme, metrics, text as typo};
 use crate::presentation::ui::dialog::{Dialog, ProviderPicker};
-use komet_proto::{PermissionChoice, PermissionKind, Scope};
+use aucteris_harness::komet_proto::{PermissionChoice, PermissionKind, Scope};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -271,20 +271,21 @@ impl Shell {
         // into the same turn instead of starting a new one.
         if self.running() {
             let chat_id = self.workspace.chat().id;
-            if self.run_chat == Some(chat_id) && self.engine.can_steer(chat_id) {
-                if self.engine.steer(chat_id, prompt.clone()) {
-                    self.draft.clear();
-                    self.workspace.chat_mut().messages.push(Message {
-                        author: Author::You,
-                        bot: None,
-                        parts: vec![Part::Text(prompt)],
-                        time: "now".into(),
-                        streaming: false,
-                        stopped: false,
-                    });
-                    self.workspace.replace_last_preview();
-                    cx.notify();
-                }
+            if self.run_chat == Some(chat_id)
+                && self.engine.can_steer(chat_id)
+                && self.engine.steer(chat_id, prompt.clone())
+            {
+                self.draft.clear();
+                self.workspace.chat_mut().messages.push(Message {
+                    author: Author::You,
+                    bot: None,
+                    parts: vec![Part::Text(prompt)],
+                    time: "now".into(),
+                    streaming: false,
+                    stopped: false,
+                });
+                self.workspace.replace_last_preview();
+                cx.notify();
             }
             return;
         }
@@ -308,8 +309,6 @@ impl Shell {
             return;
         };
         let run_config = engine::BotRunConfig {
-            id: bot.id,
-            name: bot.name.to_string(),
             runtime: bot.runtime.to_string(),
             folder: bot.folder.to_string(),
             instructions: bot.instructions.to_string(),
@@ -530,17 +529,16 @@ impl Shell {
                 }
             }
             Action::ToolProgress { text, append } => {
-                if let Some(message) = self.reply_mut() {
-                    if let Some(Part::Tool { result, .. }) = message
+                if let Some(message) = self.reply_mut()
+                    && let Some(Part::Tool { result, .. }) = message
                         .parts
                         .iter_mut()
                         .rev()
                         .find(|part| matches!(part, Part::Tool { done: false, .. }))
-                    {
-                        match result {
-                            Some(slot) if append => slot.push_str(&text),
-                            slot => *slot = Some(text),
-                        }
+                {
+                    match result {
+                        Some(slot) if append => slot.push_str(&text),
+                        slot => *slot = Some(text),
                     }
                 }
                 cx.notify();
@@ -596,11 +594,11 @@ impl Shell {
             message.streaming = false;
             message.finish_last_tool(None);
         }
-        if let Some(bot_id) = self.run_bot {
-            if let Some(bot) = self.workspace.bot_mut(bot_id) {
-                bot.presence = Presence::Resting;
-                bot.activity = "Completed".into();
-            }
+        if let Some(bot_id) = self.run_bot
+            && let Some(bot) = self.workspace.bot_mut(bot_id)
+        {
+            bot.presence = Presence::Resting;
+            bot.activity = "Completed".into();
         }
         self.run_bot = None;
         self.run_chat = None;
@@ -623,11 +621,11 @@ impl Shell {
             }
             message.finish_last_tool(Some("Run failed".into()));
         }
-        if let Some(bot_id) = self.run_bot.take() {
-            if let Some(bot) = self.workspace.bot_mut(bot_id) {
-                bot.presence = Presence::Resting;
-                bot.activity = "Run failed".into();
-            }
+        if let Some(bot_id) = self.run_bot.take()
+            && let Some(bot) = self.workspace.bot_mut(bot_id)
+        {
+            bot.presence = Presence::Resting;
+            bot.activity = "Run failed".into();
         }
         self.run_chat = None;
         self.free_text_question = None;
@@ -645,18 +643,18 @@ impl Shell {
         if let Some(chat_id) = self.run_chat {
             self.engine.stop(chat_id);
         }
-        if let Some(message) = self.reply_mut() {
-            if message.streaming {
-                message.streaming = false;
-                message.stopped = true;
-                message.finish_last_tool(Some("Stopped".into()));
-            }
+        if let Some(message) = self.reply_mut()
+            && message.streaming
+        {
+            message.streaming = false;
+            message.stopped = true;
+            message.finish_last_tool(Some("Stopped".into()));
         }
-        if let Some(bot_id) = self.run_bot.take() {
-            if let Some(bot) = self.workspace.bot_mut(bot_id) {
-                bot.presence = Presence::Resting;
-                bot.activity = "Stopped on request".into();
-            }
+        if let Some(bot_id) = self.run_bot.take()
+            && let Some(bot) = self.workspace.bot_mut(bot_id)
+        {
+            bot.presence = Presence::Resting;
+            bot.activity = "Stopped on request".into();
         }
         self.run_chat = None;
         self.free_text_question = None;
@@ -693,14 +691,14 @@ impl Shell {
         part_index: usize,
         cx: &mut Context<Self>,
     ) {
-        if let Some(chat) = self.workspace.chats.get_mut(chat_index) {
-            if let Some(message) = chat.messages.get_mut(message_index) {
-                match message.parts.get_mut(part_index) {
-                    Some(Part::Files { undone, .. }) | Some(Part::Note { undone, .. }) => {
-                        *undone = true;
-                    }
-                    _ => {}
+        if let Some(chat) = self.workspace.chats.get_mut(chat_index)
+            && let Some(message) = chat.messages.get_mut(message_index)
+        {
+            match message.parts.get_mut(part_index) {
+                Some(Part::Files { undone, .. }) | Some(Part::Note { undone, .. }) => {
+                    *undone = true;
                 }
+                _ => {}
             }
         }
         cx.notify();

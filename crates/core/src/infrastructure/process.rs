@@ -275,17 +275,17 @@ pub fn run_cli(spec: &CliSpec, req: &RunRequest) -> Result<RunOutcome> {
     // Engine sandbox: wrap the whole invocation in bubblewrap when a
     // plan was requested and bwrap is available. Otherwise degrade to
     // runtime-only isolation — the executor records which happened.
-    if let Some(plan) = &req.sandbox {
-        if let Ok(argv) = crate::sandbox::wrap_argv(plan, &program, &args) {
-            let mut wrapped = Command::new(&argv[0]);
-            wrapped
-                .args(&argv[1..])
-                .current_dir(&req.workspace)
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            cmd = wrapped;
-        }
+    if let Some(plan) = &req.sandbox
+        && let Ok(argv) = crate::sandbox::wrap_argv(plan, &program, &args)
+    {
+        let mut wrapped = Command::new(&argv[0]);
+        wrapped
+            .args(&argv[1..])
+            .current_dir(&req.workspace)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        cmd = wrapped;
     }
 
     // Own process group: enables killing the whole descendant tree.
@@ -396,6 +396,7 @@ pub fn run_cli(spec: &CliSpec, req: &RunRequest) -> Result<RunOutcome> {
         pid: Some(child.id()),
         cgroup_limited: cgroup.is_some(),
         egress: egress.as_ref().map(|p| p.counts()),
+        session_id: None,
     })
 }
 
@@ -413,6 +414,9 @@ pub fn request_for(workspace: &Path, prompt: &str, events: &Path) -> RunRequest 
         egress_filter: None,
         mcp: None,
         event_sink: None,
+        resume_session: None,
+        interactions: None,
+        steering: None,
     }
 }
 
