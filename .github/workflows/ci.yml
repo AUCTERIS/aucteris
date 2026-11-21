@@ -18,7 +18,8 @@ env:
 jobs:
   rust:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # gpui tree: fmt+clippy+nextest+doctests sequentially exceed 30min cold.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

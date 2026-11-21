@@ -22,7 +22,8 @@ env:
 jobs:
   coverage:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # instrument-coverage rebuilds the whole tree — same cost class as rust.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
