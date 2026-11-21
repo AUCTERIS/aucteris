@@ -1,6 +1,8 @@
 //! Local UI persistence for bot profiles and plain chat history.
 
-use crate::domain::model::{Author, Bot, Chat, MascotShape, Message, Part, Presence, Workspace};
+use crate::domain::model::{
+    Author, Bot, Chat, MascotShape, Message, Mode, Part, Presence, Settings, Workspace,
+};
 use aucteris_harness::komet_proto::SandboxLevel;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -11,6 +13,36 @@ struct PersistedWorkspace {
     chats: Vec<PersistedChat>,
     tokens_used: u64,
     tokens_cap: u64,
+    /// App-wide preferences. Absent in files written before settings were
+    /// persisted: those load as `Settings::default()`.
+    #[serde(default)]
+    settings: PersistedSettings,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct PersistedSettings {
+    #[serde(default)]
+    mode: PersistedMode,
+    #[serde(default = "default_runtime")]
+    default_runtime: String,
+    #[serde(default = "default_send_on_enter")]
+    send_on_enter: bool,
+}
+
+fn default_runtime() -> String {
+    "codex".to_string()
+}
+
+fn default_send_on_enter() -> bool {
+    true
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PersistedMode {
+    #[default]
+    Simple,
+    Advanced,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -136,21 +168,24 @@ impl AppStorage {
             .join("aucteris")
     }
 
-    pub fn load(&self) -> Workspace {
+    /// Load the persisted workspace and app settings. A missing or
+    /// unreadable file yields empty defaults for both.
+    pub fn load(&self) -> (Workspace, Settings) {
         let Ok(raw) = std::fs::read_to_string(&self.path) else {
-            return Workspace::empty();
+            return (Workspace::empty(), Settings::default());
         };
         let Ok(state) = serde_json::from_str::<PersistedWorkspace>(&raw) else {
-            return Workspace::empty();
+            return (Workspace::empty(), Settings::default());
         };
-        state.into()
+        let settings = Settings::from(&state.settings);
+        (Workspace::from(state), settings)
     }
 
-    pub fn save(&self, workspace: &Workspace) -> anyhow::Result<()> {
+    pub fn save(&self, workspace: &Workspace, settings: &Settings) -> anyhow::Result<()> {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let state = PersistedWorkspace::from_workspace(workspace);
+        let state = PersistedWorkspace::from_workspace(workspace, settings);
         let bytes = serde_json::to_vec_pretty(&state)?;
         let temp = self.path.with_extension("json.tmp");
         std::fs::write(&temp, bytes)?;
@@ -160,12 +195,39 @@ impl AppStorage {
 }
 
 impl PersistedWorkspace {
-    fn from_workspace(workspace: &Workspace) -> Self {
+    fn from_workspace(workspace: &Workspace, settings: &Settings) -> Self {
         Self {
             bots: workspace.bots.iter().map(PersistedBot::from).collect(),
             chats: workspace.chats.iter().map(PersistedChat::from).collect(),
             tokens_used: workspace.tokens_used,
             tokens_cap: workspace.tokens_cap,
+            settings: PersistedSettings::from(settings),
+        }
+    }
+}
+
+impl From<&Settings> for PersistedSettings {
+    fn from(settings: &Settings) -> Self {
+        Self {
+            mode: match settings.mode {
+                Mode::Simple => PersistedMode::Simple,
+                Mode::Advanced => PersistedMode::Advanced,
+            },
+            default_runtime: settings.default_runtime.clone(),
+            send_on_enter: settings.send_on_enter,
+        }
+    }
+}
+
+impl From<&PersistedSettings> for Settings {
+    fn from(value: &PersistedSettings) -> Self {
+        Self {
+            mode: match value.mode {
+                PersistedMode::Simple => Mode::Simple,
+                PersistedMode::Advanced => Mode::Advanced,
+            },
+            default_runtime: value.default_runtime.clone(),
+            send_on_enter: value.send_on_enter,
         }
     }
 }
@@ -584,11 +646,46 @@ mod tests {
         let workspace = workspace_with_parts(all_parts());
         let expected = format!("{:?}", workspace.chats[0].messages[0].parts);
 
-        storage.save(&workspace).unwrap();
-        let loaded = storage.load();
+        storage
+            .save(&workspace, &Settings::default())
+            .unwrap();
+        let (loaded, _) = storage.load();
 
         assert_eq!(format!("{:?}", loaded.chats[0].messages[0].parts), expected);
         assert_eq!(loaded.chats[0].session_id.as_deref(), Some("sess-1"));
+    }
+
+    #[test]
+    fn settings_survive_save_and_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = AppStorage::new(dir.path());
+        let settings = Settings {
+            mode: Mode::Advanced,
+            default_runtime: "grok".to_string(),
+            send_on_enter: false,
+        };
+
+        storage.save(&Workspace::empty(), &settings).unwrap();
+        let (_, loaded) = storage.load();
+
+        assert_eq!(loaded.mode, Mode::Advanced);
+        assert_eq!(loaded.default_runtime, "grok");
+        assert!(!loaded.send_on_enter);
+    }
+
+    #[test]
+    fn legacy_file_without_settings_loads_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = AppStorage::new(dir.path());
+        std::fs::create_dir_all(dir.path()).unwrap();
+        std::fs::write(
+            storage.path.clone(),
+            r#"{"bots": [], "chats": [], "tokens_used": 0, "tokens_cap": 100}"#,
+        )
+        .unwrap();
+
+        let (_, settings) = storage.load();
+        assert_eq!(settings, Settings::default());
     }
 
     #[test]
@@ -627,7 +724,7 @@ mod tests {
         )
         .unwrap();
 
-        let workspace = storage.load();
+        let (workspace, _) = storage.load();
         let parts = &workspace.chats[0].messages[0].parts;
         assert_eq!(parts.len(), 1);
         assert!(matches!(parts[0], Part::Text(ref text) if text == "legacy line"));

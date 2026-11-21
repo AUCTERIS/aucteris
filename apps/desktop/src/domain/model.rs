@@ -538,7 +538,7 @@ impl Mode {
 /// A single bot's settings live in its own panel; these are the few things that
 /// change the whole app, and every one of them does something the moment it
 /// changes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     pub mode: Mode,
     /// Stable CLI runtime id assigned to new bots.

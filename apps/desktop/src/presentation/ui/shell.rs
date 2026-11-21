@@ -72,7 +72,7 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> Self {
         let storage = AppStorage::new(engine.data_dir());
-        let workspace = storage.load();
+        let (workspace, settings) = storage.load();
         let available_runtimes = engine.available_runtimes().to_vec();
         // Ask each installed CLI which models it accepts, off the UI thread.
         // Until they answer, the picker shows the built-in catalog.
@@ -116,7 +116,7 @@ impl Shell {
             search_focus: cx.focus_handle(),
             dialog_focus: cx.focus_handle(),
             scroll: ScrollHandle::new(),
-            settings: Settings::default(),
+            settings,
             dialog: None,
             panel_picker: ProviderPicker::default(),
             panel_picker_focus: cx.focus_handle(),
@@ -133,7 +133,7 @@ impl Shell {
     }
 
     pub(crate) fn persist_workspace(&self) {
-        if let Err(error) = self.storage.save(&self.workspace) {
+        if let Err(error) = self.storage.save(&self.workspace, &self.settings) {
             eprintln!("failed to save Aucteris desktop state: {error:#}");
         }
     }
