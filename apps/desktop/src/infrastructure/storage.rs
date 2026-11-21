@@ -19,7 +19,7 @@ struct PersistedWorkspace {
     settings: PersistedSettings,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct PersistedSettings {
     #[serde(default)]
     mode: PersistedMode,
@@ -27,6 +27,18 @@ struct PersistedSettings {
     default_runtime: String,
     #[serde(default = "default_send_on_enter")]
     send_on_enter: bool,
+}
+
+// Derived Default would bypass the serde field defaults and yield an
+// empty runtime / send_on_enter=false for files with no settings at all.
+impl Default for PersistedSettings {
+    fn default() -> Self {
+        Self {
+            mode: PersistedMode::default(),
+            default_runtime: default_runtime(),
+            send_on_enter: default_send_on_enter(),
+        }
+    }
 }
 
 fn default_runtime() -> String {
