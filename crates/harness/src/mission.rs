@@ -34,7 +34,7 @@ use tokio::sync::{mpsc, oneshot};
 
 /// Mission runtime name → komet harness, for the runtimes core missions
 /// already know. Anything else stays on the supervised CLI adapters.
-const SESSION_RUNTIMES: &[&str] = &["claude-code", "codex", "opencode", "devin"];
+const SESSION_RUNTIMES: &[&str] = &["claude-code", "codex", "opencode", "devin", "grok"];
 
 /// Register harness-backed adapters for every runtime komet can drive.
 /// This REPLACES the supervised CLI adapters of the same name in the

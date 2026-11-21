@@ -123,6 +123,7 @@ icon_table!(
     "opencode-mark",
     "gemini-mark",
     "devin-mark",
+    "grok-mark",
     "star",
 );
 
