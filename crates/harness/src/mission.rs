@@ -20,8 +20,10 @@ use aucteris_core::sandbox::SandboxMounts;
 use futures::StreamExt;
 use komet_harness::{CancellationToken, Harness, SteerMessage};
 use komet_proto::{
-    AgentEvent, DoneStatus, PermissionChoice, RunRequest as KometRunRequest, SandboxLevel, Scope,
+    AgentEvent, DoneStatus, McpServerConfig, McpTransport, PermissionChoice, ResolvedMcpServer,
+    RunRequest as KometRunRequest, SandboxLevel, Scope,
 };
+use std::collections::HashMap;
 use std::io::Write;
 use std::sync::{
     Arc,
@@ -87,6 +89,10 @@ impl RuntimeAdapter for HarnessMissionAdapter {
         // Engine sandbox is not applied on this path (see limitations);
         // mounts are declared for completeness only.
         SandboxMounts::default()
+    }
+
+    fn supports_mcp(&self) -> bool {
+        true
     }
 
     fn run(&self, req: RunRequest) -> Result<RunOutcome> {
@@ -179,6 +185,32 @@ impl HarnessMissionAdapter {
             env: Vec::new(),
         };
 
+        // Engine MCP plan (memory) rides komet's external-server slot as a
+        // stdio server; env/secrets are launch-only, never logged.
+        let mcp_external: Vec<ResolvedMcpServer> = req
+            .mcp
+            .iter()
+            .map(|plan| {
+                let env: HashMap<String, String> = plan.env.iter().cloned().collect();
+                ResolvedMcpServer {
+                    config: McpServerConfig {
+                        id: plan.name.clone(),
+                        name: plan.name.clone(),
+                        enabled: true,
+                        transport: McpTransport::Stdio,
+                        command: Some(plan.command.clone()),
+                        args: Vec::new(),
+                        url: None,
+                        headers: HashMap::new(),
+                        env: env.clone(),
+                        always_load: true,
+                    },
+                    resolved_headers: HashMap::new(),
+                    resolved_env: env,
+                }
+            })
+            .collect();
+
         let komet_req = KometRunRequest {
             prompt: req.prompt.clone(),
             harness: None,
@@ -197,9 +229,9 @@ impl HarnessMissionAdapter {
             attachments: Vec::new(),
             worktree: None,
             permission_timeout_ms: None,
-            use_mcp: false,
+            use_mcp: !mcp_external.is_empty(),
             mcp: None,
-            mcp_external: Vec::new(),
+            mcp_external,
         };
 
         let mut stream = self
