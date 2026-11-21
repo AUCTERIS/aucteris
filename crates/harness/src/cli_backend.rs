@@ -6,6 +6,11 @@
 //! steering, no per-tool approvals — the wrapped adapter's own sandbox
 //! plan still applies (bubblewrap when available), exactly like the
 //! legacy mission path did.
+//!
+//! shortcut: `allow_network: true` is required — the agent CLI must reach
+//! its own API through the sandbox. Selective egress (the engine's
+//! EgressProxy allowlist) is not wired on this path; upgrade when a
+//! runtime needs network-denied chats.
 
 use async_trait::async_trait;
 use aucteris_core::runtime::{RunRequest as CoreRunRequest, RuntimeAdapter, RuntimeEvent};
