@@ -6,8 +6,13 @@ on:
   pull_request:
   schedule:
     - cron: "23 4 * * 1" # weekly, Monday 04:23 UTC
+  workflow_dispatch:
 
 permissions: {}
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   analyze:
@@ -20,6 +25,8 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4
         with:
           languages: rust

@@ -21,6 +21,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           components: rustfmt, clippy
@@ -32,21 +34,29 @@ jobs:
       - name: Install cargo-nextest
         uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2
         with:
-          tool: cargo-nextest
+          tool: cargo-nextest@0.9.152
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Lint workspace
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test workspace
-        run: cargo nextest run --workspace
+        run: cargo nextest run --workspace --locked
       - name: Test doctests
-        run: cargo test --workspace --doc
+        run: cargo test --workspace --doc --locked
 
   deny:
     # Supply-chain gate: RustSec advisories, license allow-list, duplicate
     # and wildcard bans, and git/registry source policy (see deny.toml).
+    # cargo-deny is installed from a pinned release with SHA-256 verified
+    # by install-action — no floating `latest` in the gate itself.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2
+        with:
+          tool: cargo-deny@0.22.0
+      - run: cargo deny check
+
