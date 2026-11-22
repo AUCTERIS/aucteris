@@ -62,3 +62,65 @@ jobs:
           - Known accepted risks live in \`deny.toml\` comments — do not "fix" them here.
           EOF
           )"
+
+      - name: Correlate alerts and diff risks
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          title=$(gh pr view "$PR" --repo "$REPO" --json title --jq .title)
+
+          # Which open Dependabot alerts does this PR likely address?
+          if alerts_raw=$(gh api "repos/$REPO/dependabot/alerts?state=open&ecosystem=cargo&per_page=100" \
+            --jq '[.[] | .dependency.package.name] | unique | .[]' 2>/dev/null); then
+            alerts="$alerts_raw"
+          else
+            alerts="__api_error__"
+          fi
+          pkg=$(grep -oE 'Bump [a-zA-Z0-9_-]+ from' <<<"$title" | awk '{print $2}' || true)
+          matched=""
+          if [ "$alerts" = "__api_error__" ]; then
+            matched="alert lookup unavailable (app permission or API error) — check manually"
+          elif [ -n "$pkg" ] && grep -qx "$pkg" <<<"$alerts"; then
+            matched="closes open alert(s) for \`$pkg\`"
+          elif [ -n "$alerts" ]; then
+            matched="open cargo alerts still pending: ${alerts//$'\n'/,}"
+          else
+            matched="no open cargo Dependabot alerts"
+          fi
+
+          # Git-sourced additions bypass crates.io review — flag them.
+          git_adds=$(gh pr diff "$PR" --repo "$REPO" | grep -cE '^\+source = "git\+' || true)
+          git_note="none"
+          [ "$git_adds" -gt 0 ] && git_note="⚠️ **$git_adds** new git-sourced lock entries — unreviewed code path, verify the pinned rev"
+
+          # Major version bumps change APIs — need code review beyond the lockfile.
+          major_note=""
+          if grep -qE 'Bump .* from [0-9]+\.' <<<"$title"; then
+            from_v=$(grep -oE 'from [0-9]+' <<<"$title" | awk '{print $2}' | head -1)
+            to_v=$(grep -oE 'to [0-9]+' <<<"$title" | awk '{print $2}' | head -1)
+            if [ -n "$from_v" ] && [ -n "$to_v" ] && [ "$from_v" != "$to_v" ]; then
+              major_note="
+          - ⚠️ Major bump ($from_v → $to_v): API changes possible — the lockfile passing does NOT mean the code still compiles against it."
+            fi
+          fi
+
+          body="<!-- aucteris-security:alerts -->
+          **Alert correlation** (automated)
+
+          - $title
+          - $matched
+          - Git-source additions: $git_note$major_note"
+          # shellcheck disable=SC2001
+          body=$(sed 's/^ *//' <<<"$body")
+
+          existing=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.body | contains("<!-- aucteris-security:alerts -->")) | .id' | head -1)
+          if [ -n "$existing" ]; then
+            gh api "repos/$REPO/issues/comments/$existing" -X PATCH -f body="$body" >/dev/null
+          else
+            gh api "repos/$REPO/issues/$PR/comments" -X POST -f body="$body" >/dev/null
+          fi
