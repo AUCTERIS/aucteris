@@ -1,0 +1,86 @@
+name: review-triage
+
+# Deterministic PR triage performed AS aucteris-reviewer (GitHub App).
+# Inert until the app exists and vars.REVIEWER_BOT_ENABLED=true is set —
+# see AUCTERIS/.github/bots/README.md for app creation + secrets.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions: {}
+
+concurrency:
+  group: review-triage-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  triage:
+    name: Label and checklist
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: vars.REVIEWER_BOT_ENABLED == 'true'
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Mint aucteris-reviewer token
+        id: app-token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          app-id: ${{ secrets.AUCTERIS_REVIEWER_APP_ID }}
+          private-key: ${{ secrets.AUCTERIS_REVIEWER_PRIVATE_KEY }}
+
+      - name: Apply area and size labels
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')
+
+          has() { grep -qE "$1" <<<"$files"; }
+
+          labels=()
+          has '^(apps/desktop|crates/harness)/' && labels+=("area/ui")
+          has '^crates/core/' && labels+=("area/core")
+          has '^apps/cli/' && labels+=("area/cli")
+          has '^\.github/|^deny\.toml|^Cargo\.(toml|lock)|^rust-toolchain' && labels+=("area/ci")
+          has '^docs/|\.md$' && labels+=("area/docs")
+          has '^crates/' && labels+=("area/rust")
+
+          # Ensure labels exist (idempotent; org may already have them)
+          for l in "${labels[@]:-}"; do
+            [ -z "$l" ] && continue
+            gh label create "$l" --repo "$REPO" --color BFD4F2 --description "Auto-triaged area" 2>/dev/null || true
+            gh pr edit "$PR" --repo "$REPO" --add-label "$l"
+          done
+
+          # Size from the PR's own additions+deletions
+          stats=$(gh pr view "$PR" --repo "$REPO" --json additions,deletions --jq '.additions + .deletions')
+          if [ "$stats" -lt 50 ]; then size=XS; elif [ "$stats" -lt 300 ]; then size=S
+          elif [ "$stats" -lt 1000 ]; then size=M; else size=L; fi
+          gh label create "size/$size" --repo "$REPO" --color C5DEF5 --description "Auto-triaged size" 2>/dev/null || true
+          gh pr edit "$PR" --repo "$REPO" --add-label "size/$size"
+
+      - name: Remind about PR template if sections are missing
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          missing=""
+          grep -q '## Summary' <<<"$BODY" || missing="$missing Summary"
+          grep -q '## Security notes' <<<"$BODY" || missing="$missing Security-notes"
+          [ -z "$missing" ] && exit 0
+          gh pr comment "$PR" --repo "$REPO" --body "$(cat <<EOF
+          <!-- aucteris-reviewer -->
+          PR template incomplete — missing section(s):$missing.
+          Please fill the template so reviewers can verify trust-boundary impact.
+          EOF
+          )"
