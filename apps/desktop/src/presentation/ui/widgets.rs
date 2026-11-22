@@ -349,3 +349,43 @@ pub fn compact_count(value: u64) -> String {
         value.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{compact_count, hsla_to_rgb, mascot_motion_frames};
+    use gpui::hsla;
+
+    #[test]
+    fn compact_count_scales_units() {
+        assert_eq!(compact_count(0), "0");
+        assert_eq!(compact_count(999), "999");
+        assert_eq!(compact_count(1_000), "1k");
+        assert_eq!(compact_count(12_400), "12k");
+        assert_eq!(compact_count(999_999), "999k");
+        assert_eq!(compact_count(1_000_000), "1.0M");
+        assert_eq!(compact_count(2_500_000), "2.5M");
+    }
+
+    #[test]
+    fn mascot_motion_frames_bookend_on_rest() {
+        for id in [0usize, 1, 7, 42] {
+            let frames = mascot_motion_frames(id);
+            assert!(frames.len() > 4);
+            assert_eq!(frames.first().map(|(glyph, _)| *glyph), Some(0));
+            assert_eq!(frames.last().map(|(glyph, _)| *glyph), Some(0));
+            // Durations are all positive.
+            assert!(frames.iter().all(|(_, ms)| *ms > 0));
+        }
+    }
+
+    #[test]
+    fn hsla_to_rgb_handles_extremes() {
+        assert_eq!(hsla_to_rgb(hsla(0.0, 0.0, 0.0, 1.0)), [0, 0, 0]);
+        assert_eq!(hsla_to_rgb(hsla(0.0, 0.0, 1.0, 1.0)), [255, 255, 255]);
+        // Deterministic: same input, same output.
+        assert_eq!(
+            hsla_to_rgb(hsla(0.7, 0.8, 0.6, 1.0)),
+            hsla_to_rgb(hsla(0.7, 0.8, 0.6, 1.0))
+        );
+    }
+}
