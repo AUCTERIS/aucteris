@@ -5,8 +5,11 @@ name: security-triage
 # Inert until vars.SECURITY_BOT_ENABLED=true — see
 # AUCTERIS/.github/bots/README.md.
 
+# pull_request_target for the same reason as review-triage: dependabot PRs
+# get no secrets under pull_request. Read-only gh api usage only — never
+# checks out PR code.
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize]
 
 permissions: {}
