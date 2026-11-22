@@ -79,6 +79,14 @@ pub enum Action {
     Usage {
         input: u64,
         output: u64,
+        /// Context-window size the runtime reported alongside the counts,
+        /// when it knows its model's window.
+        context_limit: Option<u64>,
+    },
+    /// Live context-window gauge: the denominator for "how full is this
+    /// chat". `limit == 0` means the runtime does not know its window.
+    ContextWindow {
+        limit: u64,
     },
 }
 
@@ -411,11 +419,18 @@ fn emit(event: AgentEvent, out: &mpsc::UnboundedSender<EngineEvent>) -> Option<R
         AgentEvent::Usage {
             input_tokens,
             output_tokens,
+            context_limit,
             ..
         } => Some(Action::Usage {
             input: input_tokens,
             output: output_tokens,
+            context_limit,
         }),
+        AgentEvent::ContextWindow { stats } if stats.context_limit > 0 => {
+            Some(Action::ContextWindow {
+                limit: stats.context_limit,
+            })
+        }
         AgentEvent::Error { message, .. } => Some(Action::Error(message)),
         AgentEvent::Done {
             status,

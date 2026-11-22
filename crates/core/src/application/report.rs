@@ -1,5 +1,5 @@
 //! Mission report — separates agent assertions, runtime observations,
-//! independent verification, and unresolved uncertainty (doc 09 §4).
+//! independent verification, and unresolved uncertainty (aucteris-architecture 09-EVIDENCE-AND-OBSERVABILITY §4).
 
 use crate::domain::*;
 use crate::store::Store;
@@ -125,7 +125,7 @@ pub fn build_report(store: &Store, mission_id: &str) -> Result<String> {
     writeln!(md, "## Known limitations (slice 01)")?;
     writeln!(
         md,
-        "- Persistence is a JSON file store, not the final durable design (ADR-0003 pending)."
+        "- Persistence is a JSON file store, not the final durable design (see ADR-0003)."
     )?;
     // Engine sandbox state is per-attempt; summarize honestly.
     let sandboxed = attempts.iter().any(|a| {

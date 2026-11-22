@@ -9,6 +9,7 @@ publish = false
 anyhow.workspace = true
 aucteris-core.workspace = true
 aucteris-harness.workspace = true
+chrono.workspace = true
 gpui.workspace = true
 gpui_platform.workspace = true
 image.workspace = true
