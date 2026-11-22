@@ -4,8 +4,11 @@ name: review-triage
 # Inert until the app exists and vars.REVIEWER_BOT_ENABLED=true is set —
 # see AUCTERIS/.github/bots/README.md for app creation + secrets.
 
+# pull_request_target (not pull_request): dependabot-triggered runs cannot
+# access secrets, so app-token minting would fail. Safe because this job
+# never checks out or executes PR code — gh api / gh pr diff are read-only.
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
 
 permissions: {}
