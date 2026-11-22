@@ -1,26 +1,108 @@
-name: Rust workspace
+name: ci
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  check:
+  rust:
     runs-on: ubuntu-latest
+    # gpui tree: fmt+clippy+nextest+doctests sequentially exceed 30min cold.
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          components: rustfmt
-      - uses: Swatinem/rust-cache@v2
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Install native build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y protobuf-compiler libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-dev libxcb1-dev libx11-xcb-dev libfontconfig1-dev libfreetype-dev libasound2-dev libvulkan-dev libdbus-1-dev pkg-config cmake
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2
+        with:
+          tool: cargo-nextest@0.9.152
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Lint workspace
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test workspace
-        run: cargo test --workspace
+        run: cargo nextest run --workspace --locked
+      - name: Test doctests
+        run: cargo test --workspace --doc --locked
+
+  deny:
+    # Supply-chain gate: RustSec advisories, license allow-list, duplicate
+    # and wildcard bans, and git/registry source policy (see deny.toml).
+    # cargo-deny is installed from a pinned release with SHA-256 verified
+    # by install-action — no floating `latest` in the gate itself.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2
+        with:
+          tool: cargo-deny@0.22.0
+      - run: cargo deny check
+
+  hygiene:
+    # Repo/tooling hygiene that has nothing to do with compilation:
+    # workflow lint (actionlint, digest-pinned image) and unused-dependency
+    # detection (cargo-machete, pinned release + hash).
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Lint GitHub Actions workflows
+        run: >-
+          docker run --rm
+          -v "$GITHUB_WORKSPACE:/repo" -w /repo
+          rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+          -color
+      - name: Install cargo-machete
+        uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2
+        with:
+          tool: cargo-machete@0.10.1
+      - name: Detect unused dependencies
+        run: cargo machete
+
+  sbom:
+    # CycloneDX SBOM of the full resolved dependency tree. Generated from
+    # cargo metadata only (no build), so it is cheap enough to run on
+    # every change and doubles as a diff-able dependency manifest.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2
+        with:
+          tool: cargo-cyclonedx@0.5.10
+      - name: Generate CycloneDX SBOMs
+        # One <crate>.cdx.json per workspace member — cargo metadata only,
+        # no build.
+        run: cargo cyclonedx --format json --spec-version 1.5 --all-features
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom-cyclonedx
+          path: "**/*.cdx.json"
+          retention-days: 90

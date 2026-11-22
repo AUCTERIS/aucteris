@@ -1,0 +1,7 @@
+# Canonical identities for git shortlog / GitHub contribution stats.
+# Same person, different local git configs — unify under the GitHub login
+# so history and blame stay attributable.
+
+jomvick <doriankoanda@gmail.com> KC Dorian <doriankoanda@gmail.com>
+jomvick <doriankoanda@gmail.com> koanda chekib <doriankoanda@gmail.com>
+NICE-DEV226 <nicedev226@gmail.com>
