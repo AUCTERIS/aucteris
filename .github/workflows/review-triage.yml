@@ -66,6 +66,86 @@ jobs:
           gh label create "size/$size" --repo "$REPO" --color C5DEF5 --description "Auto-triaged size" 2>/dev/null || true
           gh pr edit "$PR" --repo "$REPO" --add-label "size/$size"
 
+      - name: Static diff checks
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          diff=$(gh pr diff "$PR" --repo "$REPO")
+
+          # Walk the unified diff: track the current file, inspect added lines.
+          findings=""
+          cur_file=""
+          rust_added=0 test_added=0 src_changed=0
+          unwrap_n=0 panic_n=0 unsafe_n=0
+          while IFS= read -r line; do
+            case "$line" in
+              diff\ --git*) cur_file="${line#* b/}" ;;
+              +++*) ;;
+              +*)
+                [ "$cur_file" = "" ] && continue
+                case "$cur_file" in
+                  */tests/*|*_test.rs|tests.rs) test_added=$((test_added+1)) ;;
+                  *.rs)
+                    rust_added=$((rust_added+1))
+                    content="${line#+}"
+                    grep -qE '(^|[^a-zA-Z_])(unwrap|expect)\s*\(' <<<"$content" && unwrap_n=$((unwrap_n+1))
+                    grep -qE '\bpanic!|\btodo!|\bunimplemented!' <<<"$content" && panic_n=$((panic_n+1))
+                    grep -qE '\bunsafe\b' <<<"$content" && unsafe_n=$((unsafe_n+1))
+                    grep -qE '#\[(test|tokio::test|test_case)|#\[cfg\(test\)\]' <<<"$content" && test_added=$((test_added+1))
+                    ;;
+                esac
+                case "$cur_file" in
+                  crates/*/src/*|apps/*/src/*) src_changed=$((src_changed+1)) ;;
+                esac
+                ;;
+            esac
+          done <<<"$diff"
+
+          files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')
+          stats=$(gh pr view "$PR" --repo "$REPO" --json additions,deletions --jq '"+\(.additions) -\(.deletions)"')
+
+          # Trust-boundary files demand explicit human review.
+          if grep -qE '^(deny\.toml|\.github/workflows/|\.cargo/|rust-toolchain\.toml|CODEOWNERS|\.github/CODEOWNERS)' <<<"$files"; then
+            findings="$findings
+          - ⚠️ Touches trust-boundary files (CI/deny/toolchain) — requires maintainer review, bots cannot approve."
+            gh label create "needs-human-review" --repo "$REPO" --color D93F0B --description "Touches trust boundaries" 2>/dev/null || true
+            gh pr edit "$PR" --repo "$REPO" --add-label "needs-human-review"
+          fi
+
+          [ "$unwrap_n" -gt 0 ] && findings="$findings
+          - \`unwrap()/expect()\` added: **$unwrap_n** line(s) — verify error paths can't panic on untrusted input."
+          [ "$panic_n" -gt 0 ] && findings="$findings
+          - \`panic!/todo!/unimplemented!\` added: **$panic_n** line(s)."
+          [ "$unsafe_n" -gt 0 ] && findings="$findings
+          - \`unsafe\` added: **$unsafe_n** line(s) — needs a safety comment and reviewer sign-off."
+          if [ "$src_changed" -gt 20 ] && [ "$test_added" -eq 0 ]; then
+            findings="$findings
+          - Source changed (**$src_changed** added src lines) with **no test changes** — consider coverage for new behavior."
+          fi
+
+          [ -z "$findings" ] && findings="
+          - No unwrap/expect/panic/unsafe additions; test coverage present or N/A."
+
+          body="<!-- aucteris-reviewer:static -->
+          **Static review** (deterministic, \`aucteris-reviewer\`)
+
+          - Diff: $(wc -l <<<"$files" | tr -d ' ') files, $stats
+          - Rust lines added: $rust_added$findings"
+          # shellcheck disable=SC2001
+          body=$(sed 's/^ *//' <<<"$body")
+
+          existing=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.body | contains("<!-- aucteris-reviewer:static -->")) | .id' | head -1)
+          if [ -n "$existing" ]; then
+            gh api "repos/$REPO/issues/comments/$existing" -X PATCH -f body="$body" >/dev/null
+          else
+            gh api "repos/$REPO/issues/$PR/comments" -X POST -f body="$body" >/dev/null
+          fi
+
       - name: Remind about PR template if sections are missing
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
