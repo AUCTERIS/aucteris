@@ -334,7 +334,14 @@ impl Shell {
             .text_size(px(typo::TINY))
             .text_color(color)
             .on_click(cx.listener(move |this, _event, _window, cx| {
-                this.undo_part(chat_index, message_index, part_index, cx)
+                this.dispatch(
+                    crate::presentation::ui::action::UiAction::UndoPart {
+                        chat: chat_index,
+                        message: message_index,
+                        part: part_index,
+                    },
+                    cx,
+                )
             }))
             .child("Undo")
             .into_any_element()

@@ -123,7 +123,12 @@ impl Shell {
     }
 
     /// Shortcuts work from anywhere, including an empty window.
-    pub(super) fn on_root_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn on_root_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.create_menu_open && event.keystroke.key == "escape" {
             self.create_menu_open = false;
             cx.notify();

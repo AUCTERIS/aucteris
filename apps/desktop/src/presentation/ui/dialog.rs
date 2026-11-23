@@ -271,7 +271,7 @@ impl ProviderPicker {
 
 /// Which copy of the picker a click mutates: the open bot form, or the
 /// bot panel's chip.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PickerHost {
     Form,
     Panel,

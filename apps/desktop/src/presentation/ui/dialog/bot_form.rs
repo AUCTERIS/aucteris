@@ -4,9 +4,9 @@ use gpui::{
     AnyElement, Context, FontWeight, IntoElement, ParentElement, Styled, div, prelude::*, px,
 };
 
+use crate::domain::model::{MascotShape, Presence};
 use crate::presentation::theme::{Theme, metrics, text as typo};
 use crate::presentation::ui::shell::Shell;
-use crate::domain::model::{MascotShape, Presence};
 use crate::presentation::ui::widgets;
 
 use super::{BotForm, Dialog, Field, PickerHost};

@@ -154,7 +154,10 @@ impl Shell {
                 theme,
                 cx.listener(|this, _event, _window, cx| {
                     if this.appearance != crate::presentation::theme::Appearance::Dark {
-                        this.toggle_appearance(cx);
+                        this.dispatch(
+                            crate::presentation::ui::action::UiAction::ToggleAppearance,
+                            cx,
+                        );
                     }
                 }),
             ))
@@ -165,7 +168,10 @@ impl Shell {
                 theme,
                 cx.listener(|this, _event, _window, cx| {
                     if this.appearance != crate::presentation::theme::Appearance::Light {
-                        this.toggle_appearance(cx);
+                        this.dispatch(
+                            crate::presentation::ui::action::UiAction::ToggleAppearance,
+                            cx,
+                        );
                     }
                 }),
             ))
@@ -179,14 +185,24 @@ impl Shell {
                 Mode::Simple.label(),
                 self.settings.mode == Mode::Simple,
                 theme,
-                cx.listener(|this, _event, _window, cx| this.set_mode(Mode::Simple, cx)),
+                cx.listener(|this, _event, _window, cx| {
+                    this.dispatch(
+                        crate::presentation::ui::action::UiAction::SetMode(Mode::Simple),
+                        cx,
+                    )
+                }),
             ))
             .child(widgets::segment(
                 ("settings-mode", 1),
                 Mode::Advanced.label(),
                 self.settings.mode == Mode::Advanced,
                 theme,
-                cx.listener(|this, _event, _window, cx| this.set_mode(Mode::Advanced, cx)),
+                cx.listener(|this, _event, _window, cx| {
+                    this.dispatch(
+                        crate::presentation::ui::action::UiAction::SetMode(Mode::Advanced),
+                        cx,
+                    )
+                }),
             ))
             .into_any_element();
 

@@ -36,7 +36,6 @@ impl Shell {
         self.workspace.selected = self.workspace.chats.len() - 1;
         self.panel_open = true;
         self.scroll.scroll_to_bottom();
-        self.persist_workspace();
         cx.notify();
     }
 
@@ -77,7 +76,6 @@ impl Shell {
         } else {
             format!("{} bots in this team", room.members.len()).into()
         };
-        self.persist_workspace();
         cx.notify();
     }
     // ---- bot panel actions ----------------------------------------------
@@ -86,7 +84,6 @@ impl Shell {
         if let Some(bot) = self.workspace.bot_mut(bot_id) {
             bot.sandbox = model::next_sandbox(bot.sandbox);
         }
-        self.persist_workspace();
         cx.notify();
     }
 
@@ -94,7 +91,6 @@ impl Shell {
         if let Some(bot) = self.workspace.bot_mut(bot_id) {
             bot.tokens = 0;
         }
-        self.persist_workspace();
         cx.notify();
     }
 

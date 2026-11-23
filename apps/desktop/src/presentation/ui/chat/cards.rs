@@ -289,13 +289,7 @@ impl Shell {
                                             .text_size(px(typo::META))
                                             .on_click(cx.listener(
                                                 move |this, _event, _window, cx| {
-                                                    this.answer_approval(
-                                                        chat_index,
-                                                        message_index,
-                                                        part_index,
-                                                        choice_index,
-                                                        cx,
-                                                    )
+                                                    this.dispatch(crate::presentation::ui::action::UiAction::AnswerApproval { chat: chat_index, message: message_index, part: part_index, choice: choice_index }, cx)
                                                 },
                                             ))
                                             .child(label.clone())
@@ -391,13 +385,7 @@ impl Shell {
                                             .text_color(theme.ink_secondary)
                                             .on_click(cx.listener(
                                                 move |this, _event, _window, cx| {
-                                                    this.answer_question_choice(
-                                                        chat_index,
-                                                        message_index,
-                                                        part_index,
-                                                        option_index,
-                                                        cx,
-                                                    )
+                                                    this.dispatch(crate::presentation::ui::action::UiAction::AnswerQuestionChoice { chat: chat_index, message: message_index, part: part_index, option: option_index }, cx)
                                                 },
                                             ))
                                             .child(option.clone())
@@ -418,12 +406,7 @@ impl Shell {
                                             .text_color(theme.on_accent)
                                             .on_click(cx.listener(
                                                 move |this, _event, _window, cx| {
-                                                    this.answer_question_multi(
-                                                        chat_index,
-                                                        message_index,
-                                                        part_index,
-                                                        cx,
-                                                    )
+                                                    this.dispatch(crate::presentation::ui::action::UiAction::AnswerQuestionMulti { chat: chat_index, message: message_index, part: part_index }, cx)
                                                 },
                                             ))
                                             .child("Send"),

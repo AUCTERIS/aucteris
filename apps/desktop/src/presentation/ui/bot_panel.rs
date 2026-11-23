@@ -44,7 +44,9 @@ impl Shell {
                 ("close-panel", 0),
                 "x",
                 theme,
-                cx.listener(|this, _event, _window, cx| this.toggle_panel(cx)),
+                cx.listener(|this, _event, _window, cx| {
+                    this.dispatch(crate::presentation::ui::action::UiAction::TogglePanel, cx)
+                }),
             ));
 
         let identity = div()
@@ -176,7 +178,12 @@ impl Shell {
             "Sandbox",
             crate::domain::model::sandbox_label(bot.sandbox).to_string(),
             true,
-            move |this, cx| this.cycle_sandbox(bot_id, cx),
+            move |this, cx| {
+                this.dispatch(
+                    crate::presentation::ui::action::UiAction::CycleSandbox(bot_id),
+                    cx,
+                )
+            },
         );
 
         let instructions = div()
@@ -222,7 +229,10 @@ impl Shell {
                             .text_size(px(typo::TINY))
                             .text_color(theme.ink_tertiary)
                             .on_click(cx.listener(move |this, _event, _window, cx| {
-                                this.reset_usage(bot_id, cx)
+                                this.dispatch(
+                                    crate::presentation::ui::action::UiAction::ResetUsage(bot_id),
+                                    cx,
+                                )
                             }))
                             .child("Reset"),
                     ),
@@ -337,7 +347,13 @@ impl Shell {
                         "x",
                         theme,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.remove_bot_from_room(room_id, bot_id, cx)
+                            this.dispatch(
+                                crate::presentation::ui::action::UiAction::RemoveBotFromRoom {
+                                    room: room_id,
+                                    bot: bot_id,
+                                },
+                                cx,
+                            )
                         }),
                     ))
                     .into_any_element(),
@@ -378,7 +394,13 @@ impl Shell {
                         "plus",
                         theme,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.add_bot_to_room(room_id, bot_id, cx)
+                            this.dispatch(
+                                crate::presentation::ui::action::UiAction::AddBotToRoom {
+                                    room: room_id,
+                                    bot: bot_id,
+                                },
+                                cx,
+                            )
                         }),
                     ))
                     .into_any_element(),
@@ -397,7 +419,9 @@ impl Shell {
                 ("close-panel", 1),
                 "x",
                 theme,
-                cx.listener(|this, _event, _window, cx| this.toggle_panel(cx)),
+                cx.listener(|this, _event, _window, cx| {
+                    this.dispatch(crate::presentation::ui::action::UiAction::TogglePanel, cx)
+                }),
             ));
 
         div()

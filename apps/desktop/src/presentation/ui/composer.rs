@@ -67,7 +67,9 @@ impl Shell {
                 .justify_center()
                 .cursor_pointer()
                 .hover(|style| style.opacity(0.85))
-                .on_click(cx.listener(|this, _event, _window, cx| this.stop_run(cx)))
+                .on_click(cx.listener(|this, _event, _window, cx| {
+                    this.dispatch(crate::presentation::ui::action::UiAction::StopRun, cx)
+                }))
                 .child(widgets::icon("stop", 12.0, theme.bg))
                 .into_any_element()
         } else {

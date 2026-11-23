@@ -502,7 +502,12 @@ impl Shell {
             .bg(background)
             .cursor_pointer()
             .hover(move |style| style.bg(hover))
-            .on_click(cx.listener(move |this, _event, _window, cx| this.select_chat(index, cx)))
+            .on_click(cx.listener(move |this, _event, _window, cx| {
+                this.dispatch(
+                    crate::presentation::ui::action::UiAction::SelectChat(index),
+                    cx,
+                )
+            }))
             .child(mark)
             .child(
                 div()
@@ -582,7 +587,12 @@ impl Shell {
                     .rounded(px(metrics::RADIUS_CONTROL))
                     .cursor_pointer()
                     .hover(|style| style.bg(theme.raised_hover))
-                    .on_click(cx.listener(|this, _event, _window, cx| this.toggle_appearance(cx)))
+                    .on_click(cx.listener(|this, _event, _window, cx| {
+                        this.dispatch(
+                            crate::presentation::ui::action::UiAction::ToggleAppearance,
+                            cx,
+                        )
+                    }))
                     .child(widgets::icon(
                         if theme.is_dark() { "sun" } else { "moon" },
                         16.0,

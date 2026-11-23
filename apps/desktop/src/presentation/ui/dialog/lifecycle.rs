@@ -427,7 +427,10 @@ impl Shell {
                 .unwrap_or(usize::MAX)
         });
         members.dedup();
-        self.create_team(title, members, cx);
+        self.dispatch(
+            crate::presentation::ui::action::UiAction::CreateTeam { title, members },
+            cx,
+        );
         window.focus(&self.focus, cx);
     }
     pub(crate) fn set_mode(&mut self, mode: Mode, cx: &mut Context<Self>) {

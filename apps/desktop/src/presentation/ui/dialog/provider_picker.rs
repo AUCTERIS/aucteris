@@ -1,9 +1,7 @@
 //! The provider/model picker shared by the bot form dropdown and the bot
 //! panel chip: filtering, rail tabs, scrolling and applying a choice.
 
-use gpui::{
-    AnyElement, Context, FontWeight, KeyDownEvent, Styled, Window, div, prelude::*, px,
-};
+use gpui::{AnyElement, Context, FontWeight, KeyDownEvent, Styled, Window, div, prelude::*, px};
 
 use crate::presentation::theme::{Theme, metrics, text as typo};
 use crate::presentation::ui::shell::Shell;
@@ -25,7 +23,12 @@ impl Shell {
 
     /// A picker row was clicked: write the choice where its host keeps it.
     /// The form edits `runtime` until save; the panel writes the bot live.
-    fn apply_provider_choice(&mut self, host: PickerHost, choice: String, cx: &mut Context<Self>) {
+    pub(crate) fn apply_provider_choice(
+        &mut self,
+        host: PickerHost,
+        choice: String,
+        cx: &mut Context<Self>,
+    ) {
         match host {
             PickerHost::Form => {
                 if let Some(Dialog::Bot(form)) = self.dialog.as_mut() {
@@ -34,11 +37,10 @@ impl Shell {
                 }
             }
             PickerHost::Panel => {
-                if let Some(bot_id) = self.workspace.selected_bot() {
-                    if let Some(bot) = self.workspace.bot_mut(bot_id) {
-                        bot.runtime = choice.into();
-                    }
-                    self.persist_workspace();
+                if let Some(bot_id) = self.workspace.selected_bot()
+                    && let Some(bot) = self.workspace.bot_mut(bot_id)
+                {
+                    bot.runtime = choice.into();
                 }
                 self.panel_picker.open = false;
                 self.panel_picker.search.clear();
@@ -311,7 +313,13 @@ impl Shell {
                     })
                     .hover(move |s| s.bg(hover))
                     .on_click(cx.listener(move |this, _event, _window, cx| {
-                        this.apply_provider_choice(host, choice_id.clone(), cx);
+                        this.dispatch(
+                            crate::presentation::ui::action::UiAction::ApplyProviderChoice {
+                                host,
+                                choice: choice_id.clone(),
+                            },
+                            cx,
+                        );
                     }))
                     .child(
                         div()

@@ -165,7 +165,9 @@ impl Shell {
                     .when(self.panel_open, |this| this.bg(theme.raised))
                     .cursor_pointer()
                     .hover(|style| style.bg(theme.raised))
-                    .on_click(cx.listener(|this, _event, _window, cx| this.toggle_panel(cx)))
+                    .on_click(cx.listener(|this, _event, _window, cx| {
+                        this.dispatch(crate::presentation::ui::action::UiAction::TogglePanel, cx)
+                    }))
                     .child(widgets::icon("panel", 16.0, theme.ink_secondary)),
             )
             .into_any_element()

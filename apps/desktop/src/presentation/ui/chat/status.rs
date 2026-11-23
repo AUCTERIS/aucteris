@@ -79,9 +79,12 @@ impl Shell {
                                 .hover(move |style| style.bg(hover))
                                 .text_size(px(typo::TINY))
                                 .text_color(stop_color)
-                                .on_click(
-                                    cx.listener(|this, _event, _window, cx| this.stop_run(cx)),
-                                )
+                                .on_click(cx.listener(|this, _event, _window, cx| {
+                                    this.dispatch(
+                                        crate::presentation::ui::action::UiAction::StopRun,
+                                        cx,
+                                    )
+                                }))
                                 .child(widgets::icon("stop", 9.0, stop_color))
                                 .child("Stop"),
                         )
