@@ -7,7 +7,7 @@
 
 use gpui::Context;
 
-use crate::domain::model::Mode;
+use crate::domain::model::{AppearancePreference, Mode};
 use crate::presentation::ui::dialog::PickerHost;
 use crate::presentation::ui::shell::Shell;
 
@@ -18,12 +18,30 @@ pub enum UiAction {
     StopRun,
     TogglePanel,
     ToggleAppearance,
-    CycleSandbox(u32),
+    SetAppearance(AppearancePreference),
     ResetUsage(u32),
     UndoPart {
         chat: usize,
         message: usize,
         part: usize,
+    },
+    OpenFile {
+        chat: usize,
+        path: String,
+    },
+    ToggleFileDiff {
+        chat: usize,
+        message: usize,
+        part: usize,
+    },
+    ToggleThought {
+        chat: usize,
+        message: usize,
+        part: usize,
+    },
+    ToggleActivity {
+        chat: usize,
+        message: usize,
     },
     AnswerApproval {
         chat: usize,
@@ -65,7 +83,7 @@ impl UiAction {
     /// Whether handling this action changes persisted state. Chrome-only
     /// toggles skip the disk write.
     fn persists(&self) -> bool {
-        !matches!(self, Self::TogglePanel | Self::ToggleAppearance)
+        !matches!(self, Self::TogglePanel)
     }
 }
 
@@ -78,13 +96,25 @@ impl Shell {
             UiAction::StopRun => self.stop_run(cx),
             UiAction::TogglePanel => self.toggle_panel(cx),
             UiAction::ToggleAppearance => self.toggle_appearance(cx),
-            UiAction::CycleSandbox(bot) => self.cycle_sandbox(bot, cx),
+            UiAction::SetAppearance(preference) => self.set_appearance(preference, cx),
             UiAction::ResetUsage(bot) => self.reset_usage(bot, cx),
             UiAction::UndoPart {
                 chat,
                 message,
                 part,
             } => self.undo_part(chat, message, part, cx),
+            UiAction::OpenFile { chat, path } => self.open_file(chat, &path, cx),
+            UiAction::ToggleFileDiff {
+                chat,
+                message,
+                part,
+            } => self.toggle_file_diff(chat, message, part, cx),
+            UiAction::ToggleThought {
+                chat,
+                message,
+                part,
+            } => self.toggle_thought(chat, message, part, cx),
+            UiAction::ToggleActivity { chat, message } => self.toggle_activity(chat, message, cx),
             UiAction::AnswerApproval {
                 chat,
                 message,

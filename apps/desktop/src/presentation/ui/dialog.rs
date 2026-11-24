@@ -21,12 +21,11 @@ use crate::domain::model::{Bot, MascotShape};
 use crate::presentation::theme::{Theme, metrics, text as typo};
 use crate::presentation::ui::shell::Shell;
 use crate::presentation::ui::widgets;
-/// The four text fields of the new-bot form, in Tab order.
+/// The three text fields of the new-bot form, in Tab order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
     Name,
     Role,
-    Folder,
     Instructions,
 }
 
@@ -35,13 +34,12 @@ impl Field {
         match self {
             Self::Name => 0,
             Self::Role => 1,
-            Self::Folder => 2,
-            Self::Instructions => 3,
+            Self::Instructions => 2,
         }
     }
 
     fn next(self, backwards: bool) -> Self {
-        let order = [Self::Name, Self::Role, Self::Folder, Self::Instructions];
+        let order = [Self::Name, Self::Role, Self::Instructions];
         let current = self.index();
         let next = if backwards {
             (current + order.len() - 1) % order.len()
@@ -55,7 +53,6 @@ impl Field {
         match self {
             Self::Name => "Name",
             Self::Role => "Role",
-            Self::Folder => "Folder",
             Self::Instructions => "Instructions",
         }
     }
@@ -71,27 +68,25 @@ pub struct BotForm {
     pub target: Option<u32>,
     pub name: String,
     pub role: String,
-    pub folder: String,
     pub instructions: String,
     pub runtime: String,
     pub color: usize,
     pub mascot: MascotShape,
     pub active: Field,
-    pub focus: [FocusHandle; 4],
+    pub focus: [FocusHandle; 3],
     pub provider: ProviderPicker,
 }
 
 impl BotForm {
-    pub fn new(runtime: String, color: usize, focus: [FocusHandle; 4]) -> Self {
+    pub fn new(runtime: String, color: usize, focus: [FocusHandle; 3]) -> Self {
         Self {
             target: None,
             name: String::new(),
             role: "General".to_string(),
-            folder: "~".to_string(),
             instructions: String::new(),
             runtime,
             color,
-            mascot: MascotShape::Sparkle,
+            mascot: MascotShape::default(),
             active: Field::Name,
             focus,
             provider: ProviderPicker::default(),
@@ -99,12 +94,11 @@ impl BotForm {
     }
 
     /// Open the form on an existing bot: every field starts at its current value.
-    pub fn from_bot(bot: &Bot, focus: [FocusHandle; 4]) -> Self {
+    pub fn from_bot(bot: &Bot, focus: [FocusHandle; 3]) -> Self {
         Self {
             target: Some(bot.id),
             name: bot.name.to_string(),
             role: bot.role.to_string(),
-            folder: bot.folder.to_string(),
             instructions: bot.instructions.to_string(),
             runtime: bot.runtime.to_string(),
             color: bot.color,
@@ -123,7 +117,6 @@ impl BotForm {
         match field {
             Field::Name => &self.name,
             Field::Role => &self.role,
-            Field::Folder => &self.folder,
             Field::Instructions => &self.instructions,
         }
     }
@@ -132,7 +125,6 @@ impl BotForm {
         match field {
             Field::Name => &mut self.name,
             Field::Role => &mut self.role,
-            Field::Folder => &mut self.folder,
             Field::Instructions => &mut self.instructions,
         }
     }
@@ -145,6 +137,7 @@ impl BotForm {
 /// What the person has typed so far for a new team: a title and the bots
 /// that will share its chat.
 pub struct TeamForm {
+    pub target: Option<u32>,
     pub title: String,
     /// Selected bot ids, in click order.
     pub members: Vec<u32>,
@@ -154,8 +147,18 @@ pub struct TeamForm {
 impl TeamForm {
     pub fn new(focus: FocusHandle) -> Self {
         Self {
+            target: None,
             title: String::new(),
             members: Vec::new(),
+            focus,
+        }
+    }
+
+    pub fn from_chat(chat: &crate::domain::model::Chat, focus: FocusHandle) -> Self {
+        Self {
+            target: Some(chat.id),
+            title: chat.title.to_string(),
+            members: chat.members.clone(),
             focus,
         }
     }
@@ -168,14 +171,18 @@ impl TeamForm {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsPage {
     General,
+    Appearance,
+    Providers,
     Behavior,
     Shortcuts,
     About,
 }
 
 impl SettingsPage {
-    const ALL: [SettingsPage; 4] = [
+    pub(super) const ALL: [SettingsPage; 6] = [
         SettingsPage::General,
+        SettingsPage::Appearance,
+        SettingsPage::Providers,
         SettingsPage::Behavior,
         SettingsPage::Shortcuts,
         SettingsPage::About,
@@ -184,6 +191,8 @@ impl SettingsPage {
     fn label(self) -> &'static str {
         match self {
             Self::General => "General",
+            Self::Appearance => "Appearance",
+            Self::Providers => "Providers",
             Self::Behavior => "Behavior",
             Self::Shortcuts => "Shortcuts",
             Self::About => "About",
@@ -206,11 +215,21 @@ struct ProviderChoice {
 
 /// Selectable runtime/model pairs — only for CLIs actually installed on
 /// PATH. A provider that isn't present never appears in the picker.
-fn provider_choices(engine: &crate::application::engine::Engine) -> Vec<ProviderChoice> {
+fn provider_choices(
+    engine: &crate::application::engine::Engine,
+    disabled_runtimes: &[String],
+    current_runtime: Option<&str>,
+) -> Vec<ProviderChoice> {
     use crate::application::engine::Engine;
     let mut choices = Vec::new();
     for cli in engine.available_runtimes() {
         if !Engine::runtime_usable(cli.id) {
+            continue;
+        }
+        let current_provider = current_runtime
+            .map(Engine::runtime_base)
+            .is_some_and(|runtime| runtime == cli.id);
+        if disabled_runtimes.iter().any(|runtime| runtime == cli.id) && !current_provider {
             continue;
         }
         choices.push(ProviderChoice {
@@ -323,7 +342,7 @@ impl Shell {
         div()
             .id("dialog")
             .w(px(width))
-            .max_h(px(600.0))
+            .max_h(px(metrics::DIALOG_MAX_HEIGHT))
             .flex()
             .flex_col()
             .overflow_hidden()
@@ -404,7 +423,6 @@ impl Shell {
         let placeholder = match field {
             Field::Name => "Ada",
             Field::Role => "Research",
-            Field::Folder => "~/code/project",
             Field::Instructions => "How this bot should work",
         };
         let text_color = if empty { theme.ink_tertiary } else { theme.ink };
@@ -419,11 +437,17 @@ impl Shell {
         // before the placeholder when the field is empty — on every line of
         // a multiline field alike.
         let (display, caret_ranges) = caret_spans(&value, placeholder, active, self.caret_visible);
-        let content = StyledText::new(display).with_highlights(
-            caret_ranges
-                .into_iter()
-                .map(|range| (range, HighlightStyle::color(theme.ink_secondary))),
-        );
+        let content =
+            StyledText::new(display).with_highlights(caret_ranges.into_iter().map(|range| {
+                (
+                    range,
+                    HighlightStyle::color(if self.caret_visible {
+                        theme.ink_secondary
+                    } else {
+                        theme.inset
+                    }),
+                )
+            }));
 
         div()
             .id(("field", field.index()))
@@ -503,15 +527,17 @@ impl Shell {
 /// The caret is always at the end of the value — insertion is append-only —
 /// rendered as a `|` glyph the caller highlights. An empty field shows the
 /// caret *before* the placeholder instead. Inactive fields and the blink's
-/// off phase return the plain text with no caret range.
+/// off phase keep the same text and hide the caret by coloring it like the
+/// field background. Keeping the text stable prevents the whole line from
+/// repainting on every blink.
 pub(crate) fn caret_spans(
     value: &str,
     placeholder: &str,
     active: bool,
-    caret_visible: bool,
+    _caret_visible: bool,
 ) -> (String, Vec<Range<usize>>) {
     let shown = if value.is_empty() { placeholder } else { value };
-    if !active || !caret_visible {
+    if !active {
         return (shown.to_string(), Vec::new());
     }
     let caret_at = if value.is_empty() { 0 } else { shown.len() };
@@ -557,11 +583,11 @@ mod tests {
     #[test]
     fn blink_off_hides_the_caret() {
         let (text, ranges) = caret_spans("Ada", "Name…", true, false);
-        assert_eq!(text, "Ada");
-        assert!(ranges.is_empty());
+        assert_eq!(text, "Ada|");
+        assert_eq!(ranges, vec![3..4]);
         let (text, ranges) = caret_spans("", "Ada", true, false);
-        assert_eq!(text, "Ada");
-        assert!(ranges.is_empty());
+        assert_eq!(text, "|Ada");
+        assert_eq!(ranges, vec![0..1]);
     }
 
     #[test]

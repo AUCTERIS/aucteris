@@ -131,13 +131,14 @@ impl Theme {
         let ink = hsla(0.11, 0.05, 0.95, 1.0);
         Self {
             appearance: Appearance::Dark,
-            bg: hsla(0.0, 0.0, 0.133, 1.0),
-            panel: hsla(0.0, 0.0, 0.082, 1.0),
-            card: hsla(0.0, 0.0, 0.145, 1.0),
-            raised: hsla(0.0, 0.0, 0.157, 1.0),
-            raised_hover: hsla(0.0, 0.0, 0.18, 1.0),
-            user_plate: hsla(0.0, 0.0, 0.92, 1.0),
-            on_user_plate: hsla(0.0, 0.0, 0.12, 1.0),
+            // Match Komet's neutral shell: #191919 canvas and #1f1f1f sidebars.
+            bg: hsla(0.0, 0.0, 25.0 / 255.0, 1.0),
+            panel: hsla(0.0, 0.0, 31.0 / 255.0, 1.0),
+            card: hsla(0.0, 0.0, 26.0 / 255.0, 1.0),
+            raised: hsla(0.0, 0.0, 0.27, 1.0),
+            raised_hover: hsla(0.0, 0.0, 0.32, 1.0),
+            user_plate: hsla(0.0, 0.0, 0.27, 1.0),
+            on_user_plate: hsla(0.0, 0.0, 0.968, 1.0),
             inset: hsla(0.0, 0.0, 0.095, 1.0),
             control: hsla(0.0, 0.0, 0.16, 1.0),
             menu: hsla(0.0, 0.0, 0.15, 1.0),
@@ -172,11 +173,11 @@ impl Theme {
         Self {
             appearance: Appearance::Light,
             bg: hsla(0.0, 0.0, 1.0, 1.0),
-            panel: hsla(0.12, 0.08, 0.955, 1.0),
+            panel: hsla(0.0, 0.0, 0.968, 1.0),
             card: hsla(0.0, 0.0, 1.0, 1.0),
-            raised: hsla(0.12, 0.05, 0.895, 1.0),
-            raised_hover: hsla(0.12, 0.05, 0.86, 1.0),
-            user_plate: hsla(0.12, 0.05, 0.895, 1.0),
+            raised: hsla(0.0, 0.0, 0.94, 1.0),
+            raised_hover: hsla(0.0, 0.0, 0.90, 1.0),
+            user_plate: hsla(0.0, 0.0, 0.94, 1.0),
             on_user_plate: ink,
             inset: hsla(0.12, 0.06, 0.945, 1.0),
             control: hsla(0.12, 0.05, 0.93, 1.0),
@@ -213,6 +214,7 @@ impl Theme {
     }
 
     /// Install as the gpui global. The only place the appearance may change.
+    #[allow(dead_code)]
     pub fn install(appearance: Appearance, cx: &mut App) {
         cx.set_global(Self::for_appearance(appearance));
     }
@@ -264,9 +266,8 @@ pub mod metrics {
     pub const SIDEBAR_WIDTH: f32 = 256.0;
     pub const PANEL_WIDTH: f32 = 332.0;
     /// Shared centered width for the transcript, status line, and composer.
-    pub const CHAT_COLUMN_WIDTH: f32 = 768.0;
+    pub const CHAT_COLUMN_WIDTH: f32 = 900.0;
     pub const HEADER_HEIGHT: f32 = 44.0;
-    pub const STATUS_HEIGHT: f32 = 26.0;
 
     pub const SPACE_1: f32 = 4.0;
     /// Half a step: stacked lines inside one chip or card.
@@ -283,16 +284,50 @@ pub mod metrics {
     pub const RADIUS_BUBBLE: f32 = 18.0;
     pub const RADIUS_COMPOSER: f32 = 26.0;
 
-    pub const CONTROL_SM: f32 = 24.0;
     pub const CONTROL_MD: f32 = 28.0;
     /// Form fields, which need room for a caret and a value.
     pub const CONTROL_LG: f32 = 32.0;
     /// A tag on a row: undo, counters.
     pub const CONTROL_XS: f32 = 20.0;
+    pub const CONTROL_SM: f32 = 24.0;
     pub const MENU_ROW: f32 = 30.0;
 
+    /// The composer capsule: prompt area above a compact controls rail.
+    pub const COMPOSER_HEIGHT: f32 = 98.0;
+    /// The composer's inner rail, between attach/input/send.
+    pub const COMPOSER_GAP: f32 = 8.0;
+    pub const COMPOSER_INSET_START: f32 = 16.0;
+    pub const COMPOSER_INSET_END: f32 = 8.0;
+
+    pub const MENU_WIDTH: f32 = 200.0;
+    pub const MENU_ENTRY_HEIGHT: f32 = 44.0;
+    pub const SIDEBAR_ROW_HEIGHT: f32 = 50.0;
+    /// The role field beside a bot's name.
+    pub const ROLE_FIELD_WIDTH: f32 = 150.0;
+    pub const DIALOG_MAX_HEIGHT: f32 = 600.0;
+
+    /// One state mark on a row or in the status strip.
+    pub const PRESENCE_DOT: f32 = 6.0;
+    /// The streaming caret under a reply.
+    pub const CARET_WIDTH: f32 = 7.0;
+
+    pub const ICON_SM: f32 = 12.0;
+    pub const ICON_MD: f32 = 16.0;
+    pub const ICON_HERO: f32 = 34.0;
+    pub const ICON_BUTTON: f32 = 26.0;
+    pub const SWITCH_WIDTH: f32 = 34.0;
+    pub const SWITCH_HEIGHT: f32 = 20.0;
+
+    /// The mascot has one size per context, so a bot mark cannot drift.
+    pub const MASCOT_STACK: f32 = 16.0;
+    pub const MASCOT_HEADER: f32 = 20.0;
+    pub const MASCOT_SWATCH: f32 = 22.0;
+    pub const MASCOT_PICK: f32 = 26.0;
+    pub const MASCOT_ROW: f32 = 28.0;
+    pub const MASCOT_PANEL: f32 = 40.0;
+
     /// Widest a person's message plate can get.
-    pub const BUBBLE_MAX_WIDTH: f32 = 560.0;
+    pub const BUBBLE_MAX_WIDTH: f32 = 760.0;
     /// The agent's cards: approval, question.
     pub const CARD_WIDTH: f32 = 422.0;
     /// Inset inside a card.
@@ -302,6 +337,26 @@ pub mod metrics {
 
     /// One inset per surface: everything starts on this left edge.
     pub const GUTTER: f32 = 12.0;
+}
+
+/// Motion. GPUI has one duration per `Animation` and an easing function;
+/// `AnimationExt` already renders a static frame when `App::reduce_motion` is
+/// set, so these values never need a second reduced-motion branch.
+#[allow(dead_code)]
+pub mod motion {
+    use std::time::Duration;
+
+    /// Press, hover and other immediate acknowledgements.
+    pub const FAST: Duration = Duration::from_millis(120);
+    /// Cards, menus and panel chrome.
+    pub const BASE: Duration = Duration::from_millis(180);
+    /// Surfaces that travel further (dialogs, sheets).
+    pub const SLOW: Duration = Duration::from_millis(260);
+
+    /// The one deceleration curve: starts quickly, settles gently.
+    pub fn ease_out() -> impl Fn(f32) -> f32 {
+        gpui::ease_out_quint()
+    }
 }
 
 /// The type table. No other sizes exist in the app.

@@ -15,7 +15,10 @@ impl Shell {
         }
         let key = event.keystroke.key.as_str();
         match key {
-            "j" => self.toggle_appearance(cx),
+            "j" => self.dispatch(
+                crate::presentation::ui::action::UiAction::ToggleAppearance,
+                cx,
+            ),
             "i" => self.toggle_panel(cx),
             "n" => self.open_new_bot(window, cx),
             "f" => {
@@ -36,6 +39,18 @@ impl Shell {
     ) {
         let modifiers = event.keystroke.modifiers;
         self.caret_visible = true;
+        if (modifiers.control || modifiers.platform) && event.keystroke.key == "v" {
+            if let Some(item) = cx.read_from_clipboard() {
+                if let Some(text) = item.text() {
+                    self.draft
+                        .push_str(&text.replace("\r\n", "\n").replace('\r', "\n"));
+                    cx.notify();
+                }
+            }
+            cx.stop_propagation();
+            window.prevent_default();
+            return;
+        }
         // Ctrl+Enter is the send chord when Enter is a line break.
         if modifiers.control || modifiers.platform {
             if event.keystroke.key == "enter" && !self.settings.send_on_enter {

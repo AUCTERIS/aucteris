@@ -23,18 +23,28 @@ impl Shell {
         let header = self.dialog_header(
             theme,
             cx,
-            "New team",
+            if form.target.is_some() {
+                "Edit team"
+            } else {
+                "New team"
+            },
             Some("A title, then the bots that share this chat.".to_string()),
         );
 
         let empty = form.title.is_empty();
         let (display, caret_ranges) =
             caret_spans(&form.title, "Launch crew", true, self.caret_visible);
-        let content = StyledText::new(display).with_highlights(
-            caret_ranges
-                .into_iter()
-                .map(|range| (range, HighlightStyle::color(theme.ink_secondary))),
-        );
+        let content =
+            StyledText::new(display).with_highlights(caret_ranges.into_iter().map(|range| {
+                (
+                    range,
+                    HighlightStyle::color(if self.caret_visible {
+                        theme.ink_secondary
+                    } else {
+                        theme.inset
+                    }),
+                )
+            }));
         let title_control = div()
             .id("team-title-field")
             .h(px(metrics::CONTROL_LG))
@@ -220,7 +230,11 @@ impl Shell {
                     .on_click(
                         cx.listener(|this, _event, window, cx| this.commit_team_form(window, cx)),
                     )
-                    .child("Create team")
+                    .child(if form.target.is_some() {
+                        "Save changes"
+                    } else {
+                        "Create team"
+                    })
                     .into_any_element(),
             )
             .into_any_element();

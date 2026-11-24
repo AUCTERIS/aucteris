@@ -1,7 +1,7 @@
 //! Dialog lifecycle: opening, keyboard handling and committing the bot,
 //! team and settings surfaces.
 
-use gpui::{Context, FocusHandle, KeyDownEvent, PathPromptOptions, Window};
+use gpui::{Context, FocusHandle, KeyDownEvent, Window};
 
 use crate::domain::model::{Bot, Chat, Mode, Presence, timestamp_now};
 use aucteris_harness::komet_proto::SandboxLevel;
@@ -12,24 +12,33 @@ use super::{BotForm, Dialog, Field, SettingsPage, TeamForm, choice_matches, prov
 impl Shell {
     // ---- opening ---------------------------------------------------------
 
-    fn form_focuses(cx: &mut Context<Self>) -> [FocusHandle; 4] {
-        [
-            cx.focus_handle(),
-            cx.focus_handle(),
-            cx.focus_handle(),
-            cx.focus_handle(),
-        ]
+    fn form_focuses(cx: &mut Context<Self>) -> [FocusHandle; 3] {
+        [cx.focus_handle(), cx.focus_handle(), cx.focus_handle()]
     }
 
     pub(crate) fn open_new_bot(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let focus = Self::form_focuses(cx);
         let color = self.workspace.bots.len() % 8;
+        let enabled = |id: &str| {
+            !self
+                .settings
+                .disabled_runtimes
+                .iter()
+                .any(|disabled| disabled == id)
+        };
+        let default_provider =
+            crate::application::engine::Engine::runtime_base(&self.settings.default_runtime);
         let runtime = self
             .available_runtimes
             .iter()
-            .find(|cli| cli.id == self.settings.default_runtime)
-            .or_else(|| self.available_runtimes.first())
-            .map(|cli| cli.id.to_string())
+            .find(|cli| cli.id == default_provider && enabled(cli.id))
+            .map(|_| self.settings.default_runtime.clone())
+            .or_else(|| {
+                self.available_runtimes
+                    .iter()
+                    .find(|cli| enabled(cli.id))
+                    .map(|cli| cli.id.to_string())
+            })
             .unwrap_or_default();
         self.dialog = Some(Dialog::Bot(Box::new(BotForm::new(runtime, color, focus))));
         self.caret_visible = true;
@@ -78,6 +87,30 @@ impl Shell {
         cx.notify();
     }
 
+    pub(crate) fn open_edit_team(
+        &mut self,
+        team_id: u32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(chat) = self
+            .workspace
+            .chats
+            .iter()
+            .find(|chat| chat.id == team_id && chat.is_room())
+            .cloned()
+        else {
+            return;
+        };
+        let focus = cx.focus_handle();
+        window.focus(&focus, cx);
+        self.dialog = Some(Dialog::Team(TeamForm::from_chat(&chat, focus)));
+        self.context_menu = None;
+        self.caret_visible = true;
+        self.create_menu_open = false;
+        cx.notify();
+    }
+
     pub(crate) fn close_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.dialog = None;
         window.focus(&self.focus, cx);
@@ -98,29 +131,6 @@ impl Shell {
             window.focus(&handle, cx);
         }
         cx.notify();
-    }
-
-    pub(crate) fn pick_working_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let prompt = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some("Select working folder".into()),
-        });
-        cx.spawn_in(window, async move |this, cx| {
-            if let Ok(Ok(Some(mut paths))) = prompt.await
-                && let Some(path) = paths.pop()
-            {
-                let path_str = path.to_string_lossy().to_string();
-                let _ = this.update(cx, |this, cx| {
-                    if let Some(Dialog::Bot(form)) = this.dialog.as_mut() {
-                        form.folder = path_str;
-                        cx.notify();
-                    }
-                });
-            }
-        })
-        .detach();
     }
 
     // ---- keys ------------------------------------------------------------
@@ -206,9 +216,13 @@ impl Shell {
                 "enter" => {
                     let query = form.provider.search.trim().to_lowercase();
                     let rail_filter = form.provider.rail.as_deref();
-                    if let Some(matched) = provider_choices(&self.engine)
-                        .iter()
-                        .find(|choice| choice_matches(choice, rail_filter, &query))
+                    if let Some(matched) = provider_choices(
+                        &self.engine,
+                        &self.settings.disabled_runtimes,
+                        Some(&form.runtime),
+                    )
+                    .iter()
+                    .find(|choice| choice_matches(choice, rail_filter, &query))
                     {
                         form.runtime = matched.id.clone();
                     }
@@ -241,7 +255,6 @@ impl Shell {
         }
 
         let mut submit = false;
-        let mut trigger_folder_picker = false;
         if let Some(Dialog::Bot(form)) = self.dialog.as_mut() {
             match key {
                 "tab" => {
@@ -249,47 +262,33 @@ impl Shell {
                     refocus = Some(form.active);
                 }
                 "enter" => {
-                    if form.active == Field::Folder {
-                        trigger_folder_picker = true;
-                    } else if modifiers.shift && form.active == Field::Instructions {
+                    if modifiers.shift && form.active == Field::Instructions {
                         form.text_mut(form.active).push('\n');
                     } else {
                         submit = form.can_submit();
                     }
                 }
                 "space" => {
-                    if form.active == Field::Folder {
-                        trigger_folder_picker = true;
-                    } else {
-                        form.text_mut(form.active).push(' ');
-                    }
+                    form.text_mut(form.active).push(' ');
                 }
                 "backspace" => {
-                    if form.active != Field::Folder {
-                        form.text_mut(form.active).pop();
-                    }
+                    form.text_mut(form.active).pop();
                 }
                 _ => {
                     if modifiers.control || modifiers.platform {
                         return;
                     }
-                    if form.active != Field::Folder {
-                        let typed = event
-                            .keystroke
-                            .key_char
-                            .clone()
-                            .or_else(|| (key == "space").then(|| " ".to_string()))
-                            .or_else(|| (key.chars().count() == 1).then(|| key.to_string()));
-                        if let Some(typed) = typed.filter(|text| !text.is_empty()) {
-                            form.text_mut(form.active).push_str(&typed);
-                        }
+                    let typed = event
+                        .keystroke
+                        .key_char
+                        .clone()
+                        .or_else(|| (key == "space").then(|| " ".to_string()))
+                        .or_else(|| (key.chars().count() == 1).then(|| key.to_string()));
+                    if let Some(typed) = typed.filter(|text| !text.is_empty()) {
+                        form.text_mut(form.active).push_str(&typed);
                     }
                 }
             }
-        }
-        if trigger_folder_picker {
-            self.pick_working_folder(window, cx);
-            return;
         }
         if let Some(field) = refocus {
             self.focus_field(field, window, cx);
@@ -319,13 +318,8 @@ impl Shell {
         } else {
             form.role.trim().to_string()
         };
-        let folder = if form.folder.trim().is_empty() {
-            "~".to_string()
-        } else {
-            form.folder.trim().to_string()
-        };
         let instructions = if form.instructions.trim().is_empty() {
-            "Ask before touching anything outside the working folder.".to_string()
+            "Read files as needed. Ask before writing outside the private workspace or approved folders.".to_string()
         } else {
             form.instructions.trim().to_string()
         };
@@ -338,7 +332,6 @@ impl Shell {
                 bot.name = name.clone().into();
                 bot.role = role.clone().into();
                 bot.runtime = runtime.clone().into();
-                bot.folder = folder.clone().into();
                 bot.instructions = instructions.into();
                 bot.color = form.color;
                 bot.mascot = form.mascot;
@@ -373,9 +366,14 @@ impl Shell {
             .max()
             .unwrap_or(0)
             + 1;
+        let folder = crate::infrastructure::storage::AppStorage::bot_workspace_path(
+            &crate::infrastructure::storage::AppStorage::data_dir(),
+            id,
+        );
 
         self.workspace.bots.push(Bot {
             id,
+            pinned: false,
             name: name.clone().into(),
             role: role.clone().into(),
             color: form.color,
@@ -383,7 +381,8 @@ impl Shell {
             runtime: runtime.clone().into(),
             presence: Presence::Resting,
             activity: "Ready".into(),
-            folder: folder.clone().into(),
+            folder: folder.to_string_lossy().to_string().into(),
+            allowed_folders: Vec::new(),
             instructions: instructions.into(),
             tokens: 0,
             context_limit: None,
@@ -391,6 +390,7 @@ impl Shell {
         });
         self.workspace.chats.push(Chat {
             id: chat_id,
+            pinned: false,
             title: name.clone().into(),
             bot: Some(id),
             members: Vec::new(),
@@ -399,8 +399,9 @@ impl Shell {
             time: timestamp_now(),
             session_id: None,
         });
+        self.stash_draft();
         self.workspace.selected = self.workspace.chats.len() - 1;
-        self.draft.clear();
+        self.restore_draft();
         self.scroll.scroll_to_bottom();
         window.focus(&self.focus, cx);
         self.persist_workspace();
@@ -417,6 +418,26 @@ impl Shell {
             return;
         }
         let title = form.title.trim().to_string();
+        if let Some(team_id) = form.target {
+            if let Some(team) = self
+                .workspace
+                .chats
+                .iter_mut()
+                .find(|chat| chat.id == team_id)
+            {
+                team.title = title.into();
+                team.members = form.members;
+                team.preview = if team.members.is_empty() {
+                    "Add bots to start this team".into()
+                } else {
+                    format!("{} bots in this team", team.members.len()).into()
+                };
+            }
+            window.focus(&self.focus, cx);
+            self.persist_workspace();
+            cx.notify();
+            return;
+        }
         // Members answer in workspace order, not click order.
         let mut members = form.members.clone();
         members.sort_by_key(|id| {
@@ -449,7 +470,7 @@ mod tests {
         assert_eq!(Field::Instructions.next(false), Field::Name);
         assert_eq!(Field::Name.next(true), Field::Instructions);
         assert_eq!(Field::Role.next(true), Field::Name);
-        for field in [Field::Name, Field::Role, Field::Folder, Field::Instructions] {
+        for field in [Field::Name, Field::Role, Field::Instructions] {
             assert_eq!(field.next(false).next(true), field);
         }
     }

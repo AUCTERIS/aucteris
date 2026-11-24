@@ -2,7 +2,9 @@
 
 use crate::application::session::{self, Sessions};
 use aucteris_core::{AucterisCore, CoreConfig};
-use aucteris_harness::komet_proto::{PermissionChoice, RunRequest, SandboxLevel, SandboxOptions};
+use aucteris_harness::komet_proto::{
+    ClaudeSandbox, PermissionChoice, RunRequest, SandboxLevel, SandboxOptions,
+};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -60,7 +62,7 @@ pub const SUPPORTED: [AgentCli; 6] = [
         label: "Grok CLI",
         executable: "grok",
         provider: "xAI",
-        icon: "grok-mark",
+        icon: "bot",
     },
 ];
 
@@ -303,8 +305,10 @@ pub struct Engine {
 }
 
 pub struct BotRunConfig {
+    pub bot_id: u32,
     pub runtime: String,
     pub folder: String,
+    pub allowed_folders: Vec<String>,
     pub instructions: String,
     /// Harness-native session id from the chat's previous turn.
     pub resume: Option<String>,
@@ -312,6 +316,11 @@ pub struct BotRunConfig {
 }
 
 impl Engine {
+    /// Persistent scoped directories are supported by Claude's native
+    /// additionalDirectories and Gemini's bubblewrap mount plan.
+    pub fn supports_scoped_folders(runtime: &str) -> bool {
+        matches!(Self::runtime_base(runtime), "claude-code" | "gemini")
+    }
     pub fn open() -> anyhow::Result<Self> {
         let data_dir = crate::infrastructure::storage::AppStorage::data_dir();
         let core = AucterisCore::open(CoreConfig::new(&data_dir))?;
@@ -485,14 +494,44 @@ impl Engine {
         }
         let full_prompt = compose_prompt(&bot.instructions, prompt);
         let workspace = crate::infrastructure::storage::expand_home(&bot.folder);
+        let assigned_workspace = crate::infrastructure::storage::AppStorage::bot_workspace_path(
+            &self.data_dir,
+            bot.bot_id,
+        );
+        let is_private_workspace = workspace == assigned_workspace;
         std::fs::create_dir_all(&workspace)?;
+        #[cfg(unix)]
+        if is_private_workspace {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&workspace, std::fs::Permissions::from_mode(0o700))?;
+            if let Some(parent) = workspace.parent() {
+                std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
+            }
+        }
 
         // One runtime path for every CLI: komet driver when it exists,
         // otherwise the core adapter wrapped as a session backend (gemini,
         // mock) — same events, same controls, honestly degraded caps.
-        let Some(harness) = session::backend(&bot.runtime, self.core.runtimes()) else {
+        let Some(harness) = session::backend(
+            &bot.runtime,
+            self.core.runtimes(),
+            if bot.sandbox == SandboxLevel::WorkspaceWrite {
+                bot.allowed_folders.iter().map(PathBuf::from).collect()
+            } else {
+                Vec::new()
+            },
+        ) else {
             anyhow::bail!("no runtime backend for {:?}", bot.runtime);
         };
+        let mut sandbox_options = SandboxOptions::from_level(bot.sandbox);
+        if Self::runtime_base(&bot.runtime) == "claude-code"
+            && bot.sandbox == SandboxLevel::WorkspaceWrite
+        {
+            let claude = sandbox_options
+                .claude
+                .get_or_insert_with(ClaudeSandbox::default);
+            claude.additional_directories = bot.allowed_folders.clone();
+        }
         let request = RunRequest {
             prompt: full_prompt,
             harness: None,
@@ -504,7 +543,7 @@ impl Engine {
             model_options: Default::default(),
             cwd: workspace.display().to_string(),
             sandbox: bot.sandbox,
-            sandbox_options: Some(SandboxOptions::from_level(bot.sandbox)),
+            sandbox_options: Some(sandbox_options),
             // Full access means exactly that; every other level keeps the
             // harness in its approval mode so the card can gate the call.
             auto_approve: bot.sandbox == SandboxLevel::DangerFullAccess,
@@ -536,15 +575,8 @@ impl Engine {
 
     /// Answer a permission card. `false` when the request is already gone
     /// (run ended, or the harness stopped waiting).
-    pub fn answer_permission(&self, request: u64, allow: bool) -> bool {
-        self.sessions.answer_permission(
-            request,
-            if allow {
-                PermissionChoice::Allow
-            } else {
-                PermissionChoice::Deny
-            },
-        )
+    pub fn answer_permission(&self, request: u64, choice: PermissionChoice) -> bool {
+        self.sessions.answer_permission(request, choice)
     }
 
     /// Answer one question of a pending set. The harness gets the whole set
@@ -563,10 +595,12 @@ impl Engine {
 
 /// The prompt the agent receives: standing instructions, then the ask.
 fn compose_prompt(instructions: &str, prompt: &str) -> String {
-    if instructions.trim().is_empty() {
-        prompt.to_string()
+    let guidance = "Aucteris is a general-purpose assistant. Answer the user's request directly in the conversation. For comparisons, tables, JSON, and CSV, include the actual structured result in your answer instead of only creating files or reporting their paths. Do not create or edit files or run commands unless the user explicitly requests an artifact or an action that requires it. When returning HTML in a fenced html block, tell the user to use the Preview control provided with the block.";
+    let instructions = instructions.trim();
+    if instructions.is_empty() {
+        format!("{guidance}\n\nUser request:\n{prompt}")
     } else {
-        format!("{}\n\nUser request:\n{}", instructions.trim(), prompt)
+        format!("{guidance}\n\nBot instructions:\n{instructions}\n\nUser request:\n{prompt}")
     }
 }
 

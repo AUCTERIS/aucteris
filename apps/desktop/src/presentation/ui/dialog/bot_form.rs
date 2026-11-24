@@ -45,74 +45,6 @@ impl Shell {
             self.form_field(theme, cx, form, Field::Role, false),
         );
 
-        let hover = theme.hover_wash();
-        let folder_active = form.active == Field::Folder;
-        let folder_text = form.folder.trim().to_string();
-        let folder_empty = folder_text.is_empty();
-
-        let folder_control = div()
-            .id("form-folder-picker")
-            .h(px(metrics::CONTROL_LG))
-            .px(px(10.0))
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(px(8.0))
-            .rounded(px(metrics::RADIUS_CONTROL))
-            .bg(theme.inset)
-            .border_1()
-            .border_color(if folder_active {
-                theme.edge
-            } else {
-                theme.hairline
-            })
-            .cursor_pointer()
-            .track_focus(&form.focus[Field::Folder.index()])
-            .hover(move |style| style.bg(hover))
-            .on_click(cx.listener(|this, _event, window, cx| {
-                this.focus_field(Field::Folder, window, cx);
-                this.pick_working_folder(window, cx);
-            }))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .min_w_0()
-                    .flex_1()
-                    .child(widgets::icon("folder", 16.0, theme.ink_secondary))
-                    .child(
-                        div()
-                            .truncate()
-                            .font_family(theme.font_mono.clone())
-                            .text_size(px(typo::BODY))
-                            .text_color(if folder_empty {
-                                theme.ink_tertiary
-                            } else {
-                                theme.ink
-                            })
-                            .child(if folder_empty {
-                                "~/my-project".to_string()
-                            } else {
-                                folder_text
-                            }),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .px(px(8.0))
-                    .py(px(2.0))
-                    .rounded_full()
-                    .bg(theme.control)
-                    .text_size(px(typo::TINY))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.ink_secondary)
-                    .child("Browse..."),
-            )
-            .into_any_element();
-
-        let folder = self.labelled(theme, "Working folder", None, folder_control);
         let instructions = self.labelled(
             theme,
             Field::Instructions.label(),
@@ -121,6 +53,7 @@ impl Shell {
         );
 
         let runtime_name = self.engine.runtime_label(&form.runtime);
+        let hover = theme.hover_wash();
         let current_icon = crate::application::engine::Engine::runtime_icon(&form.runtime);
         let is_provider_open = form.provider.open;
 
@@ -176,18 +109,26 @@ impl Shell {
             ));
 
         let provider_section = div()
+            .relative()
             .flex()
             .flex_col()
             .gap(px(metrics::SPACE_2))
             .child(provider_trigger)
             .when(is_provider_open, |this| {
-                this.child(self.provider_picker_view(
-                    theme,
-                    cx,
-                    &form.provider,
-                    &form.runtime,
-                    PickerHost::Form,
-                ))
+                this.child(
+                    div()
+                        .absolute()
+                        .left(px(0.0))
+                        .right(px(0.0))
+                        .bottom(px(42.0))
+                        .child(self.provider_picker_view(
+                            theme,
+                            cx,
+                            &form.provider,
+                            &form.runtime,
+                            PickerHost::Form,
+                        )),
+                )
             })
             .into_any_element();
 
@@ -213,7 +154,7 @@ impl Shell {
                         form.mascot,
                         color,
                         Presence::Resting,
-                        22.0,
+                        metrics::MASCOT_SWATCH,
                         100 + slot,
                     ))
                     .into_any_element(),
@@ -246,25 +187,47 @@ impl Shell {
                     .child(widgets::mascot(
                         shape,
                         theme.identity(form.color),
-                        if selected {
-                            Presence::Working
-                        } else {
-                            Presence::Resting
-                        },
-                        26.0,
+                        Presence::Resting,
+                        metrics::MASCOT_PICK,
                         200 + shape_index,
                     ))
                     .into_any_element(),
             );
         }
 
-        // Text fields come first: name, role, folder and instructions stay in
-        // the first viewport, above the mascot/color pickers.
+        let identity_preview = div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(px(metrics::SPACE_2))
+            .child(widgets::mascot(
+                form.mascot,
+                theme.identity(form.color),
+                Presence::Resting,
+                64.0,
+                998,
+            ))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(metrics::SPACE_2))
+                    .children(swatches),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(metrics::SPACE_1))
+                    .children(mascot_buttons),
+            )
+            .into_any_element();
+
         let identity_fields = div()
             .flex()
             .gap(px(metrics::SPACE_3))
             .child(div().flex_1().child(name))
-            .child(div().w(px(150.0)).child(role))
+            .child(div().w(px(metrics::ROLE_FIELD_WIDTH)).child(role))
             .into_any_element();
 
         let body = div()
@@ -277,45 +240,11 @@ impl Shell {
             .pb(px(metrics::SPACE_4))
             .flex()
             .flex_col()
-            .gap(px(metrics::SPACE_3))
-            .child(self.labelled(theme, "Provider", None, provider_section))
+            .gap(px(metrics::SPACE_2))
+            .child(identity_preview)
             .child(identity_fields)
-            .child(folder)
             .child(instructions)
-            .child(
-                self.labelled(
-                    theme,
-                    "Mascot Shape",
-                    Some("Choose from 26 expressive agent silhouettes"),
-                    div()
-                        .flex()
-                        .flex_wrap()
-                        .gap(px(metrics::SPACE_1))
-                        .children(mascot_buttons)
-                        .into_any_element(),
-                ),
-            )
-            .child(
-                self.labelled(
-                    theme,
-                    "Color",
-                    Some("Its mark, and its name in the transcript"),
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(metrics::SPACE_2))
-                        // Live preview: the pick and the mood read at a glance.
-                        .child(widgets::mascot(
-                            form.mascot,
-                            theme.identity(form.color),
-                            Presence::Working,
-                            40.0,
-                            999,
-                        ))
-                        .child(div().flex().gap(px(metrics::SPACE_1)).children(swatches))
-                        .into_any_element(),
-                ),
-            )
+            .child(self.labelled(theme, "Model", None, provider_section))
             .into_any_element();
 
         let can_submit = form.can_submit();

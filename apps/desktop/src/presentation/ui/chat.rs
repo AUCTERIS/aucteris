@@ -1,4 +1,4 @@
-//! The chat: header, transcript, status strip, composer.
+//! The chat: header, transcript and composer.
 //!
 //! A reply is one bubble-less column: the bot's words and the steps it took sit
 //! in the same stream, because the work is the answer. Only the person's own
@@ -6,7 +6,7 @@
 
 mod cards;
 mod message;
-mod status;
+mod table;
 
 use gpui::{
     AnyElement, Context, FontWeight, IntoElement, ParentElement, Styled, Window, div, prelude::*,
@@ -39,7 +39,7 @@ impl Shell {
                 .justify_center()
                 .gap(px(metrics::SPACE_3))
                 .bg(theme.bg)
-                .child(widgets::icon("bot", 34.0, theme.ink_tertiary))
+                .child(widgets::icon("bot", metrics::ICON_HERO, theme.ink_tertiary))
                 .child(
                     div()
                         .text_size(px(typo::SHEET_TITLE))
@@ -86,9 +86,6 @@ impl Shell {
             .bg(theme.bg)
             .child(self.chat_header(theme, cx))
             .child(self.transcript(theme, cx))
-            .when(self.running(), |this| {
-                this.child(self.status_strip(theme, cx))
-            })
             .child(self.view_composer(theme, window, cx))
             .into_any_element()
     }
@@ -108,6 +105,23 @@ impl Shell {
             .border_color(theme.hairline)
             .flex()
             .items_center()
+            .child(
+                div()
+                    .id("toggle-sidebar")
+                    .size(px(metrics::CONTROL_MD))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(metrics::RADIUS_CONTROL))
+                    .when(self.sidebar_collapsed, |this| this.bg(theme.raised))
+                    .cursor_pointer()
+                    .hover(|style| style.bg(theme.raised))
+                    .on_click(cx.listener(|this, _event, _window, cx| {
+                        this.sidebar_collapsed = !this.sidebar_collapsed;
+                        cx.notify();
+                    }))
+                    .child(widgets::icon("sidebar", 16.0, theme.ink_secondary)),
+            )
             .child(div().flex_1())
             .child(
                 div()
@@ -124,7 +138,7 @@ impl Shell {
                                 bot.mascot,
                                 theme.identity(bot.color),
                                 bot.presence,
-                                20.0,
+                                metrics::MASCOT_HEADER,
                                 bot.id as usize * 1000 + 4,
                             )
                         } else if !chat.members.is_empty() {
@@ -135,7 +149,7 @@ impl Shell {
                                         member.mascot,
                                         theme.identity(member.color),
                                         member.presence,
-                                        16.0,
+                                        metrics::MASCOT_STACK,
                                         member.id as usize * 1000 + 4,
                                     ));
                                 }

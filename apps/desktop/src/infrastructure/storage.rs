@@ -1,9 +1,10 @@
 //! Local UI persistence for bot profiles and plain chat history.
 
 use crate::domain::model::{
-    Author, Bot, Chat, MascotShape, Message, Mode, Part, Presence, Settings, Workspace,
+    AppearancePreference, Author, Bot, Chat, MascotShape, Message, Mode, Part, Presence, Settings,
+    Workspace,
 };
-use aucteris_harness::komet_proto::SandboxLevel;
+use aucteris_harness::komet_proto::{PermissionChoice, SandboxLevel};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -23,6 +24,10 @@ struct PersistedWorkspace {
 struct PersistedSettings {
     #[serde(default)]
     mode: PersistedMode,
+    #[serde(default)]
+    appearance: Option<PersistedAppearance>,
+    #[serde(default)]
+    disabled_runtimes: Vec<String>,
     #[serde(default = "default_runtime")]
     default_runtime: String,
     #[serde(default = "default_send_on_enter")]
@@ -35,6 +40,8 @@ impl Default for PersistedSettings {
     fn default() -> Self {
         Self {
             mode: PersistedMode::default(),
+            appearance: None,
+            disabled_runtimes: Vec::new(),
             default_runtime: default_runtime(),
             send_on_enter: default_send_on_enter(),
         }
@@ -57,15 +64,26 @@ enum PersistedMode {
     Advanced,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PersistedAppearance {
+    Dark,
+    Light,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct PersistedBot {
     id: u32,
+    #[serde(default)]
+    pinned: bool,
     name: String,
     role: String,
     color: usize,
     mascot: String,
     runtime: String,
     folder: String,
+    #[serde(default)]
+    allowed_folders: Vec<String>,
     instructions: String,
     tokens: u64,
     /// Absent in files written before context limits were tracked.
@@ -84,6 +102,8 @@ fn full_access() -> SandboxLevel {
 #[derive(Debug, Serialize, Deserialize)]
 struct PersistedChat {
     id: u32,
+    #[serde(default)]
+    pinned: bool,
     title: String,
     bot: Option<u32>,
     members: Vec<u32>,
@@ -107,6 +127,10 @@ struct PersistedMessage {
     #[serde(default)]
     parts: Option<Vec<PersistedPart>>,
     time: String,
+    #[serde(default)]
+    duration_ms: Option<u64>,
+    #[serde(default)]
+    activity_expanded: bool,
     stopped: bool,
 }
 
@@ -119,6 +143,9 @@ enum PersistedPart {
     Text {
         text: String,
     },
+    Attachment {
+        path: String,
+    },
     Thought {
         text: String,
         collapsed: bool,
@@ -128,12 +155,26 @@ enum PersistedPart {
         label: String,
         detail: Option<String>,
         done: bool,
+        /// Absent in files written before tool failures were recorded.
+        #[serde(default)]
+        failed: bool,
         result: Option<String>,
+        /// Absent in existing saved chats.
+        #[serde(default)]
+        duration_ms: Option<u64>,
     },
     Files {
         path: String,
         added: u32,
         removed: u32,
+        #[serde(default)]
+        old_text: Option<String>,
+        #[serde(default)]
+        new_text: Option<String>,
+        #[serde(default)]
+        diff_expanded: bool,
+        #[serde(default)]
+        undo_error: Option<String>,
         undone: bool,
     },
     Note {
@@ -145,7 +186,9 @@ enum PersistedPart {
         title: String,
         detail: String,
         request: Option<u64>,
-        choices: Vec<(String, bool)>,
+        choices: Vec<(String, PersistedApprovalChoice)>,
+        #[serde(default)]
+        grant_folder_choice: Option<usize>,
         resolved: Option<String>,
     },
     Question {
@@ -160,6 +203,15 @@ enum PersistedPart {
         selected: Vec<String>,
         resolved: Option<String>,
     },
+}
+
+/// Read the original boolean approval choices as well as the newer, exact
+/// permission decision (including scope) without invalidating saved chats.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum PersistedApprovalChoice {
+    Legacy(bool),
+    Exact(PermissionChoice),
 }
 
 pub struct AppStorage {
@@ -181,6 +233,10 @@ impl AppStorage {
             })
             .unwrap_or_else(|| PathBuf::from("."))
             .join("aucteris")
+    }
+
+    pub fn bot_workspace_path(data_dir: &Path, bot_id: u32) -> PathBuf {
+        data_dir.join("bot-workspaces").join(bot_id.to_string())
     }
 
     /// Load the persisted workspace and app settings. A missing or
@@ -228,6 +284,11 @@ impl From<&Settings> for PersistedSettings {
                 Mode::Simple => PersistedMode::Simple,
                 Mode::Advanced => PersistedMode::Advanced,
             },
+            appearance: settings.appearance.map(|appearance| match appearance {
+                AppearancePreference::Dark => PersistedAppearance::Dark,
+                AppearancePreference::Light => PersistedAppearance::Light,
+            }),
+            disabled_runtimes: settings.disabled_runtimes.clone(),
             default_runtime: settings.default_runtime.clone(),
             send_on_enter: settings.send_on_enter,
         }
@@ -241,6 +302,11 @@ impl From<&PersistedSettings> for Settings {
                 PersistedMode::Simple => Mode::Simple,
                 PersistedMode::Advanced => Mode::Advanced,
             },
+            appearance: value.appearance.map(|appearance| match appearance {
+                PersistedAppearance::Dark => AppearancePreference::Dark,
+                PersistedAppearance::Light => AppearancePreference::Light,
+            }),
+            disabled_runtimes: value.disabled_runtimes.clone(),
             default_runtime: value.default_runtime.clone(),
             send_on_enter: value.send_on_enter,
         }
@@ -254,6 +320,7 @@ impl From<PersistedWorkspace> for Workspace {
             .into_iter()
             .map(|bot| Bot {
                 id: bot.id,
+                pinned: bot.pinned,
                 name: bot.name.into(),
                 role: bot.role.into(),
                 color: bot.color,
@@ -262,6 +329,7 @@ impl From<PersistedWorkspace> for Workspace {
                 presence: Presence::Resting,
                 activity: "Ready".into(),
                 folder: bot.folder.into(),
+                allowed_folders: bot.allowed_folders,
                 instructions: bot.instructions.into(),
                 tokens: bot.tokens,
                 context_limit: bot.context_limit,
@@ -284,12 +352,14 @@ impl From<&Bot> for PersistedBot {
     fn from(bot: &Bot) -> Self {
         Self {
             id: bot.id,
+            pinned: bot.pinned,
             name: bot.name.to_string(),
             role: bot.role.to_string(),
             color: bot.color,
             mascot: bot.mascot.id_str().to_string(),
             runtime: bot.runtime.to_string(),
             folder: bot.folder.to_string(),
+            allowed_folders: bot.allowed_folders.clone(),
             instructions: bot.instructions.to_string(),
             tokens: bot.tokens,
             context_limit: bot.context_limit,
@@ -302,6 +372,7 @@ impl From<&Chat> for PersistedChat {
     fn from(chat: &Chat) -> Self {
         Self {
             id: chat.id,
+            pinned: chat.pinned,
             title: chat.title.to_string(),
             bot: chat.bot,
             members: chat.members.clone(),
@@ -317,6 +388,7 @@ impl From<PersistedChat> for Chat {
     fn from(chat: PersistedChat) -> Self {
         Self {
             id: chat.id,
+            pinned: chat.pinned,
             title: chat.title.into(),
             bot: chat.bot,
             members: chat.members,
@@ -343,6 +415,7 @@ impl From<&Message> for PersistedMessage {
                 .iter()
                 .map(|part| match part {
                     Part::Text(text) => text.as_str(),
+                    Part::Attachment { path } => path.as_str(),
                     Part::Thought { text, .. } => text.as_str(),
                     Part::Tool { label, .. } => label.as_str(),
                     Part::Files { path, .. } => path.as_str(),
@@ -354,6 +427,8 @@ impl From<&Message> for PersistedMessage {
                 .join("\n"),
             parts: Some(message.parts.iter().map(PersistedPart::from).collect()),
             time: message.time.to_string(),
+            duration_ms: message.duration_ms,
+            activity_expanded: message.activity_expanded,
             stopped: message.stopped,
         }
     }
@@ -363,6 +438,7 @@ impl From<&Part> for PersistedPart {
     fn from(part: &Part) -> Self {
         match part {
             Part::Text(text) => Self::Text { text: text.clone() },
+            Part::Attachment { path } => Self::Attachment { path: path.clone() },
             Part::Thought { text, collapsed } => Self::Thought {
                 text: text.clone(),
                 collapsed: *collapsed,
@@ -372,23 +448,36 @@ impl From<&Part> for PersistedPart {
                 label,
                 detail,
                 done,
+                failed,
                 result,
+                duration_ms,
+                ..
             } => Self::Tool {
                 icon: icon.to_string(),
                 label: label.clone(),
                 detail: detail.clone(),
                 done: *done,
+                failed: *failed,
                 result: result.clone(),
+                duration_ms: *duration_ms,
             },
             Part::Files {
                 path,
                 added,
                 removed,
+                old_text,
+                new_text,
+                diff_expanded,
+                undo_error,
                 undone,
             } => Self::Files {
                 path: path.clone(),
                 added: *added,
                 removed: *removed,
+                old_text: old_text.clone(),
+                new_text: new_text.clone(),
+                diff_expanded: *diff_expanded,
+                undo_error: undo_error.clone(),
                 undone: *undone,
             },
             Part::Note { text, undone } => Self::Note {
@@ -401,13 +490,23 @@ impl From<&Part> for PersistedPart {
                 detail,
                 request,
                 choices,
+                grant_folder_choice,
                 resolved,
             } => Self::Approval {
                 kicker: kicker.clone(),
                 title: title.clone(),
                 detail: detail.clone(),
                 request: *request,
-                choices: choices.clone(),
+                choices: choices
+                    .iter()
+                    .map(|(label, choice)| {
+                        (
+                            label.clone(),
+                            PersistedApprovalChoice::Exact(choice.clone()),
+                        )
+                    })
+                    .collect(),
+                grant_folder_choice: *grant_folder_choice,
                 resolved: resolved.clone(),
             },
             Part::Question {
@@ -441,29 +540,43 @@ impl From<PersistedPart> for Part {
     fn from(part: PersistedPart) -> Self {
         match part {
             PersistedPart::Text { text } => Self::Text(text),
+            PersistedPart::Attachment { path } => Self::Attachment { path },
             PersistedPart::Thought { text, collapsed } => Self::Thought { text, collapsed },
             PersistedPart::Tool {
                 icon,
                 label,
                 detail,
                 done,
+                failed,
                 result,
+                duration_ms,
             } => Self::Tool {
                 icon: icon_id(&icon),
                 label,
                 detail,
                 done,
+                failed,
                 result,
+                duration_ms,
+                started_at: None,
             },
             PersistedPart::Files {
                 path,
                 added,
                 removed,
+                old_text,
+                new_text,
+                diff_expanded,
+                undo_error,
                 undone,
             } => Self::Files {
                 path,
                 added,
                 removed,
+                old_text,
+                new_text,
+                diff_expanded,
+                undo_error,
                 undone,
             },
             PersistedPart::Note { text, undone } => Self::Note { text, undone },
@@ -473,15 +586,30 @@ impl From<PersistedPart> for Part {
                 detail,
                 request,
                 choices,
+                grant_folder_choice,
                 resolved,
-            } => Self::Approval {
-                kicker,
-                title,
-                detail,
-                request,
-                choices,
-                resolved,
-            },
+            } => {
+                let choices = choices
+                    .into_iter()
+                    .map(|(label, choice)| {
+                        let choice = match choice {
+                            PersistedApprovalChoice::Legacy(true) => PermissionChoice::Allow,
+                            PersistedApprovalChoice::Legacy(false) => PermissionChoice::Deny,
+                            PersistedApprovalChoice::Exact(choice) => choice,
+                        };
+                        (label, choice)
+                    })
+                    .collect();
+                Self::Approval {
+                    kicker,
+                    title,
+                    detail,
+                    request,
+                    choices,
+                    grant_folder_choice,
+                    resolved,
+                }
+            }
             PersistedPart::Question {
                 request,
                 index,
@@ -539,15 +667,33 @@ impl From<PersistedMessage> for Message {
             parts,
             time: message.time.into(),
             streaming: false,
+            duration_ms: message.duration_ms,
+            started_at: None,
+            activity_expanded: message.activity_expanded,
             stopped: message.stopped,
         }
     }
 }
 
+/// Mascot ids written before the geometric set. They still load, each
+/// folded onto one of the current shapes so old bots keep a stable identity.
+const LEGACY_MASCOTS: [&str; 26] = [
+    "arch", "bean", "blob", "capsule", "cloud", "clover", "crystal", "cylinder", "dome", "egg",
+    "flower", "gem", "heart", "hex", "house", "leaf", "pebble", "pumpkin", "shield", "sparkle",
+    "square", "squircle", "star", "tablet", "teardrop", "wedge",
+];
+
 fn mascot(id: &str) -> MascotShape {
-    MascotShape::ALL
+    if let Some(shape) = MascotShape::ALL
         .into_iter()
         .find(|shape| shape.id_str() == id)
+    {
+        return shape;
+    }
+    LEGACY_MASCOTS
+        .iter()
+        .position(|legacy| *legacy == id)
+        .map(MascotShape::from_index)
         .unwrap_or_default()
 }
 
@@ -573,14 +719,16 @@ mod tests {
         let mut workspace = Workspace::empty();
         workspace.bots.push(Bot {
             id: 1,
+            pinned: false,
             name: "Scout".into(),
             role: "Research".into(),
             color: 0,
-            mascot: MascotShape::Sparkle,
+            mascot: MascotShape::Circle,
             runtime: "codex".into(),
             presence: Presence::Resting,
             activity: "Ready".into(),
             folder: "/tmp".into(),
+            allowed_folders: Vec::new(),
             instructions: String::new().into(),
             tokens: 0,
             context_limit: None,
@@ -588,6 +736,7 @@ mod tests {
         });
         workspace.chats.push(Chat {
             id: 1,
+            pinned: false,
             title: "Chat".into(),
             bot: Some(1),
             members: Vec::new(),
@@ -597,6 +746,9 @@ mod tests {
                 parts,
                 time: "now".into(),
                 streaming: false,
+                duration_ms: None,
+                started_at: None,
+                activity_expanded: false,
                 stopped: false,
             }],
             preview: "preview".into(),
@@ -619,7 +771,10 @@ mod tests {
                 label: "cargo test".to_string(),
                 detail: Some("workspace".to_string()),
                 done: true,
+                failed: false,
                 result: Some("ok".to_string()),
+                duration_ms: Some(1500),
+                started_at: None,
             },
             Part::Files {
                 path: "src/main.rs".to_string(),
@@ -637,9 +792,10 @@ mod tests {
                 detail: "cargo publish".to_string(),
                 request: Some(42),
                 choices: vec![
-                    ("Allow once".to_string(), true),
-                    ("Deny".to_string(), false),
+                    ("Allow once".to_string(), PermissionChoice::Allow),
+                    ("Deny".to_string(), PermissionChoice::Deny),
                 ],
+                grant_folder_choice: None,
                 resolved: Some("Allowed".to_string()),
             },
             Part::Question {
@@ -669,6 +825,88 @@ mod tests {
 
         assert_eq!(format!("{:?}", loaded.chats[0].messages[0].parts), expected);
         assert_eq!(loaded.chats[0].session_id.as_deref(), Some("sess-1"));
+    }
+
+    #[test]
+    fn tool_failure_survives_save_and_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = AppStorage::new(dir.path());
+        let workspace = workspace_with_parts(vec![Part::Tool {
+            icon: "terminal",
+            label: "cargo test".to_string(),
+            detail: None,
+            done: true,
+            failed: true,
+            result: Some("Run failed".to_string()),
+            duration_ms: None,
+            started_at: None,
+        }]);
+
+        storage.save(&workspace, &Settings::default()).unwrap();
+        let (loaded, _) = storage.load();
+
+        match &loaded.chats[0].messages[0].parts[0] {
+            Part::Tool {
+                done,
+                failed,
+                result,
+                ..
+            } => {
+                assert!(*done);
+                assert!(*failed);
+                assert_eq!(result.as_deref(), Some("Run failed"));
+            }
+            other => panic!("expected a tool part, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn legacy_tool_part_without_failed_loads_as_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = AppStorage::new(dir.path());
+        std::fs::create_dir_all(dir.path()).unwrap();
+        std::fs::write(
+            storage.path.clone(),
+            r#"{
+                "bots": [],
+                "chats": [{
+                    "id": 1,
+                    "title": "Old",
+                    "bot": null,
+                    "members": [],
+                    "messages": [{
+                        "author": "bot",
+                        "bot": null,
+                        "text": "cargo test",
+                        "parts": [{
+                            "kind": "tool",
+                            "icon": "terminal",
+                            "label": "cargo test",
+                            "detail": null,
+                            "done": true,
+                            "result": "ok"
+                        }],
+                        "time": "yesterday",
+                        "stopped": false
+                    }],
+                    "preview": "cargo test",
+                    "time": "yesterday"
+                }],
+                "tokens_used": 0,
+                "tokens_cap": 100
+            }"#,
+        )
+        .unwrap();
+
+        let (loaded, _) = storage.load();
+
+        match &loaded.chats[0].messages[0].parts[0] {
+            Part::Tool { done, failed, .. } => {
+                assert!(*done);
+                assert!(!*failed);
+            }
+            other => panic!("expected a tool part, got {other:?}"),
+        }
     }
 
     #[test]
@@ -754,6 +992,8 @@ mod tests {
             text: String::new(),
             parts: None,
             time: "now".to_string(),
+            duration_ms: None,
+            activity_expanded: false,
             stopped: false,
         };
         let message = Message::from(message);

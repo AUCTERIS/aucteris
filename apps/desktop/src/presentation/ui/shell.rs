@@ -10,18 +10,25 @@ mod keys;
 mod run;
 
 use gpui::{
-    App, Context, FocusHandle, Focusable, Render, ScrollHandle, SharedString, Task, Window, div,
-    prelude::*, px,
+    App, Context, FocusHandle, Focusable, Pixels, Point, Render, ScrollHandle, SharedString, Task,
+    Window, div, prelude::*, px,
 };
 
 use crate::application::engine;
-use crate::domain::model::{Settings, Workspace};
+use crate::domain::model::{AppearancePreference, Settings, Workspace};
 use crate::infrastructure::storage::AppStorage;
 use crate::presentation::theme::{Appearance, Theme, metrics, text as typo};
 use crate::presentation::ui::dialog::{Dialog, ProviderPicker};
 use aucteris_harness::komet_proto::{PermissionChoice, Scope};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ContextTarget {
+    Bot(u32),
+    Team(u32),
+}
 
 pub struct Shell {
     pub(crate) workspace: Workspace,
@@ -32,10 +39,14 @@ pub struct Shell {
 
     /// What the person is typing in the composer.
     pub(crate) draft: String,
+    /// Preserved drafts for chats the person is not looking at. Keyed by chat
+    /// id, in memory only: a draft is not a document worth syncing to disk.
+    pub(crate) drafts: HashMap<u32, String>,
     /// What they are typing in the sidebar search.
     pub(crate) search: String,
     pub(crate) searching: bool,
     pub(crate) panel_open: bool,
+    pub(crate) sidebar_collapsed: bool,
 
     pub(crate) focus: FocusHandle,
     pub(crate) search_focus: FocusHandle,
@@ -50,15 +61,24 @@ pub struct Shell {
     /// form's dropdown, with its own search/rail/scroll state.
     pub(crate) panel_picker: ProviderPicker,
     pub(crate) panel_picker_focus: FocusHandle,
+    pub(crate) panel_picker_position: Option<Point<Pixels>>,
+    pub(crate) permissions_open: bool,
+    pub(crate) permissions_position: Option<Point<Pixels>>,
     /// Blink phase of the dialog form caret; any keystroke forces it on.
     pub(crate) caret_visible: bool,
     /// The sidebar's "+" menu: New bot / New team.
     pub(crate) create_menu_open: bool,
+    pub(crate) context_menu: Option<(ContextTarget, Point<Pixels>)>,
+    pub(crate) provider_expanded: HashSet<String>,
+    /// Expanded long code blocks in the transcript, keyed by stable view id.
+    pub(crate) expanded_code_blocks: HashSet<usize>,
+    /// Files selected for the draft in each conversation.
+    pub(crate) draft_attachments: HashMap<u32, Vec<String>>,
 
     /// The UI task consuming the in-flight run's events. Dropping it cancels
     /// the loop, so a stale run can never write into a newer one — no
     /// generation counter needed.
-    run_task: Option<Task<()>>,
+    pub(crate) run_task: Option<Task<()>>,
     pub(crate) run_bot: Option<u32>,
     /// Chat whose run is in flight. Runs are per chat, not global.
     pub(crate) run_chat: Option<u32>,
@@ -77,6 +97,18 @@ impl Shell {
     ) -> Self {
         let storage = AppStorage::new(engine.data_dir());
         let (workspace, settings) = storage.load();
+        let appearance = match settings.appearance {
+            Some(AppearancePreference::Dark) => Appearance::Dark,
+            Some(AppearancePreference::Light) => Appearance::Light,
+            None => appearance,
+        };
+        let current_theme = Theme::of(cx);
+        let font_sans = current_theme.font_sans.clone();
+        let font_mono = current_theme.font_mono.clone();
+        let mut theme = Theme::for_appearance(appearance);
+        theme.font_sans = font_sans;
+        theme.font_mono = font_mono;
+        cx.set_global(theme);
         let available_runtimes = engine.available_runtimes().to_vec();
         // Ask each installed CLI which models it accepts, off the UI thread.
         // Until they answer, the picker shows the built-in catalog.
@@ -113,9 +145,11 @@ impl Shell {
             available_runtimes,
             appearance,
             draft: String::new(),
+            drafts: HashMap::new(),
             search: String::new(),
             searching: false,
             panel_open: false,
+            sidebar_collapsed: false,
             focus: cx.focus_handle(),
             search_focus: cx.focus_handle(),
             dialog_focus: cx.focus_handle(),
@@ -124,8 +158,15 @@ impl Shell {
             dialog: None,
             panel_picker: ProviderPicker::default(),
             panel_picker_focus: cx.focus_handle(),
+            panel_picker_position: None,
+            permissions_open: false,
+            permissions_position: None,
             caret_visible: true,
             create_menu_open: false,
+            context_menu: None,
+            provider_expanded: HashSet::new(),
+            expanded_code_blocks: HashSet::new(),
+            draft_attachments: HashMap::new(),
             run_task: None,
             run_bot: None,
             run_chat: None,
@@ -142,6 +183,13 @@ impl Shell {
     }
     pub(crate) fn running(&self) -> bool {
         self.status.is_some() && self.run_bot.is_some()
+    }
+
+    /// Whether the chat on screen is the one the live run belongs to. A run
+    /// keeps going while the person reads another chat; its Stop control and
+    /// status strip only appear where the run actually writes.
+    pub(crate) fn running_here(&self) -> bool {
+        self.running() && self.run_chat == Some(self.workspace.chat().id)
     }
 
     /// Whether the composer's Send can steer the run in flight.
@@ -161,15 +209,53 @@ impl Shell {
     // ---- selection -------------------------------------------------------
 
     pub(crate) fn select_chat(&mut self, index: usize, cx: &mut Context<Self>) {
-        if self.running() {
-            return;
-        }
+        self.stash_draft();
         self.workspace.select(index);
         self.searching = false;
         self.search.clear();
         self.panel_picker.open = false;
+        self.restore_draft();
         self.scroll.scroll_to_bottom();
         cx.notify();
+    }
+
+    /// Keep the text with the chat it was written for before switching.
+    pub(crate) fn stash_draft(&mut self) {
+        let chat_id = self.workspace.chat().id;
+        if self.draft.is_empty() {
+            self.drafts.remove(&chat_id);
+        } else {
+            self.drafts.insert(chat_id, self.draft.clone());
+        }
+    }
+
+    /// Bring back the draft that belongs to the newly selected chat.
+    pub(crate) fn restore_draft(&mut self) {
+        let chat_id = self.workspace.chat().id;
+        self.draft = self.drafts.remove(&chat_id).unwrap_or_default();
+    }
+
+    /// Forget the current draft once it has been sent.
+    pub(crate) fn clear_draft(&mut self) {
+        self.draft.clear();
+        let chat_id = self.workspace.chat().id;
+        self.drafts.remove(&chat_id);
+        self.draft_attachments.remove(&chat_id);
+    }
+
+    /// Whether the transcript is close enough to the bottom to keep following
+    /// new output. A reader who scrolled up owns the viewport.
+    pub(crate) fn follows_bottom(&self) -> bool {
+        let offset = self.scroll.offset();
+        let max = self.scroll.max_offset();
+        (max.y - offset.y) <= px(24.0)
+    }
+
+    /// Scroll only when the person was already reading the latest message.
+    pub(crate) fn scroll_if_following(&self) {
+        if self.follows_bottom() {
+            self.scroll.scroll_to_bottom();
+        }
     }
 
     /// The sidebar row for a bot, or a room, by title.
@@ -198,7 +284,9 @@ impl Render for Shell {
         let sidebar = self.view_sidebar(&theme, cx);
         let chat = self.view_chat(&theme, window, cx);
         let create_menu = self.view_create_menu(&theme, cx);
+        let context_menu = self.view_context_menu(&theme, cx);
         let overlay = self.view_overlay(&theme, cx);
+        let panel_popovers = self.view_panel_popovers(&theme, cx);
         let main_pane = div()
             .flex_1()
             .min_w_0()
@@ -249,11 +337,13 @@ impl Render for Shell {
             .text_size(px(typo::BODY))
             .text_color(theme.ink)
             .on_key_down(cx.listener(Self::on_root_key))
-            .child(sidebar)
+            .when(!self.sidebar_collapsed, |this| this.child(sidebar))
             .child(main_pane)
             .children(right_panel)
             .children(create_menu)
+            .children(context_menu)
             .children(overlay)
+            .children(panel_popovers)
             .into_any_element()
     }
 }
@@ -261,11 +351,11 @@ impl Render for Shell {
 /// What a permission button says.
 fn permission_label(choice: &PermissionChoice) -> String {
     match choice {
-        PermissionChoice::Allow => "Allow".to_string(),
+        PermissionChoice::Allow => "Allow once".to_string(),
         PermissionChoice::AllowAlways { scope } => match scope {
-            Scope::Chat => "Always in this chat".to_string(),
-            Scope::Repo => "Always in this repo".to_string(),
-            Scope::Pattern(pattern) => format!("Always: {pattern}"),
+            Scope::Chat => "Allow in this conversation".to_string(),
+            Scope::Repo => "Allow in this project".to_string(),
+            Scope::Pattern(pattern) => format!("Always for {pattern}"),
         },
         PermissionChoice::Deny => "Deny".to_string(),
     }

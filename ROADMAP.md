@@ -1,6 +1,6 @@
 # ROADMAP — Aucteris
 
-> Dernière mise à jour : 2026-11-19 · Positionnement : **Linux-first** · Fondations et UX
+> Dernière mise à jour : 2026-11-23 · Positionnement : **Linux-first** · Permissions et UX
 > d'abord, features ensuite
 
 Aucteris est un espace de travail local-first en Rust (GPUI + CLI) pour créer et faire
@@ -29,9 +29,13 @@ core, sans service distant.
    ailleurs elle est dégradée et signalée.
 4. **Sécurité par défaut** : jamais de full-access implicite ; les élévations sont
    toujours des choix explicites de l'utilisateur.
-5. Toute feature « quotidien agent » est validée par des tests d'intégration sur les
+5. **Accès fichiers des bots** : chaque bot reçoit automatiquement son propre espace
+   privé. Il peut lire les fichiers de l'ordinateur sans devoir ajouter chaque dossier ;
+   les écritures suivent le niveau de permission choisi et les règles du runtime. Le
+   full-access reste une élévation explicite.
+6. Toute feature « quotidien agent » est validée par des tests d'intégration sur les
    fixtures mock existantes.
-6. **Construit de bout en bout** : tout le code est écrit dans ce dépôt, hors dépendances
+7. **Construit de bout en bout** : tout le code est écrit dans ce dépôt, hors dépendances
    déclarées (GPUI, komet-harness) ; aucune reprise de code produit tiers.
 
 ## Phase 0 — Consolidation (prérequis)
@@ -52,11 +56,11 @@ La plus grosse dette avant d'ajouter des features. Suivi global : [#2](https://g
       `cargo test --workspace` + `cargo clippy -D warnings` dans la CI ; transformer les
       3 fixtures mock orphelines (`crates/core/tests/fixtures/`) en tests d'intégration
       réels ; couvrir `executor.rs` et l'orchestrator `local`.
-- [ ] **Quick fixes** — grok dans le catalogue de runtimes
+- [x] **Quick fixes** — grok dans le catalogue de runtimes
       ([#6](https://github.com/AUCTERIS/aucteris/issues/6)), réglages persistés
       ([#7](https://github.com/AUCTERIS/aucteris/issues/7)), usage tokens réels et
       timestamps réels ([#8](https://github.com/AUCTERIS/aucteris/issues/8)).
-- [ ] **Docs** ([#9](https://github.com/AUCTERIS/aucteris/issues/9)) — créer `docs/`
+- [x] **Docs** ([#9](https://github.com/AUCTERIS/aucteris/issues/9)) — créer `docs/`
       (VERTICAL-SLICE-01, ADR-0003) ; ranger les diagrammes archify (`examples/`,
       `web-app-rendered.html`) ; plus aucune référence à un document inexistant.
 
@@ -70,7 +74,7 @@ d'empiler des features.
 - [x] **Extraire la couche runtime/session en crate dédié** (`crates/harness`) — le
       desktop ne dépend plus directement de komet-harness ; API interne stable
       (RunControls, événements, approvals, questions). S'appuie sur #3.
-- [ ] **Découper les fichiers monolithiques** :
+- [x] **Découper les fichiers monolithiques** :
       [dialog.rs](apps/desktop/src/presentation/ui/dialog.rs) (2 388 l.),
       [chat.rs](apps/desktop/src/presentation/ui/chat.rs) (1 075 l.),
       [shell.rs](apps/desktop/src/presentation/ui/shell.rs) (944 l.) — un module par
@@ -97,9 +101,43 @@ d'empiler des features.
 - [ ] **Accessibilité** : navigation clavier sans souris, contrastes validés en
       dark/light.
 
-## Phase 2 — Quotidien agent
+## Phase 2 — Permissions et quotidien agent
 
-Le cœur de l'expérience : ce qui rend un bot agréable à employer toute la journée.
+Priorité produit : rendre les accès compréhensibles, prévisibles et révocables avant
+d'étendre les capacités des bots.
+
+- [ ] **Modèle d'accès aux fichiers par bot** : créer automatiquement un espace privé
+      pour chaque bot, sans demander de dossier lors de sa création. La lecture des
+      fichiers de l'ordinateur est libre par défaut ; un dossier supplémentaire ne doit
+      pas être requis pour lire.
+- [ ] **Écritures pilotées par le niveau de permission** : `ReadOnly` interdit les
+      modifications ; `WorkspaceWrite` autorise l'espace privé et les dossiers ajoutés
+      par l'utilisateur, puis demande une approbation pour les autres écritures ;
+      `DangerFullAccess` autorise les accès étendus uniquement après un choix explicite.
+      Afficher le niveau effectif et les limites propres à chaque runtime.
+- [ ] **Centre des permissions dans le panneau latéral du bot** : lister les dossiers
+      autorisés, les ajouter manuellement, les retirer et révoquer leur accès. Une
+      approbation d'écriture peut proposer d'ajouter le dossier concerné ; après accord,
+      le dossier apparaît immédiatement dans cette liste.
+- [ ] **Cartes d'approbation cohérentes** : présenter l'action et le chemin ciblé, avec
+      des choix explicites pour autoriser une fois, autoriser et ajouter le dossier, ou
+      refuser. L'approbation persistante ne doit pas être confondue avec l'autorisation
+      d'une seule écriture.
+- [ ] **Matrice de capacités des runtimes** : appliquer les dossiers ciblés seulement
+      lorsque le runtime les prend réellement en charge ; signaler les limites et ne
+      jamais afficher une autorisation persistante inactive. Garder OpenCode bloqué pour
+      l'accès ciblé tant que son sandbox ne permet pas de sélectionner des chemins ;
+      suivre séparément le support requis par l'intégration Codex/Komet.
+- [ ] **Révocation et confinement** : répercuter un retrait sur les prochains runs,
+      interrompre un run si nécessaire, vérifier les chemins canoniques et les liens
+      symboliques, et empêcher qu'un dossier approuvé élargisse silencieusement son accès.
+- [ ] **Persistance et migration** : sauvegarder les espaces privés et les autorisations
+      par bot, avec des valeurs par défaut compatibles avec les profils existants.
+- [ ] **Vérification des permissions** : couvrir chaque niveau d'accès, les demandes
+      d'approbation, l'ajout/retrait de dossiers, les chemins invalides et les différences
+      entre runtimes avec des tests d'intégration.
+
+Une fois cette base établie, poursuivre le quotidien agent :
 
 - [ ] **Files FIFO par bot** : pause/reprise/annulation, persistance crash-safe, reprise
       après redémarrage.

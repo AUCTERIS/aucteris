@@ -6,6 +6,7 @@ use gpui::{AnyElement, Context, IntoElement, ParentElement, Styled, div, prelude
 use crate::domain::model::Part;
 use crate::presentation::theme::{Theme, metrics, text as typo};
 use crate::presentation::ui::shell::Shell;
+use aucteris_harness::komet_proto::PermissionChoice;
 
 impl Shell {
     /// Answer a permission card: the clicked button says what it means.
@@ -27,20 +28,52 @@ impl Shell {
                 Part::Approval {
                     request,
                     choices,
+                    grant_folder_choice,
                     resolved,
                     ..
                 } => {
-                    let (label, allow) = choices.get(choice_index)?.clone();
+                    let (label, choice) = choices.get(choice_index)?.clone();
                     let request = request.take()?;
                     *resolved = Some(label.clone());
-                    Some((request, allow))
+                    Some((
+                        request,
+                        choice,
+                        (*grant_folder_choice == Some(choice_index)),
+                    ))
                 }
                 _ => None,
             });
-        let Some((request, allow)) = answered else {
+        let Some((request, choice, grant_folder)) = answered else {
             return;
         };
-        self.engine.answer_permission(request, allow);
+        let accepted = self.engine.answer_permission(request, choice.clone());
+        if accepted && grant_folder && choice != PermissionChoice::Deny {
+            let bot_id = self
+                .workspace
+                .chats
+                .get(chat_index)
+                .and_then(|chat| chat.bot.or_else(|| chat.members.first().copied()));
+            let folder = self
+                .workspace
+                .chats
+                .get(chat_index)
+                .and_then(|chat| chat.messages.get(message_index))
+                .and_then(|message| message.parts.get(part_index))
+                .and_then(|part| match part {
+                    Part::Approval { detail, .. } => detail
+                        .lines()
+                        .find_map(|line| line.strip_prefix("Approve this folder for future runs: "))
+                        .map(str::to_string),
+                    _ => None,
+                });
+            if let (Some(bot_id), Some(folder)) = (bot_id, folder)
+                && let Some(bot) = self.workspace.bot_mut(bot_id)
+                && !bot.allowed_folders.contains(&folder)
+            {
+                bot.allowed_folders.push(folder);
+                self.persist_workspace();
+            }
+        }
         self.resume_after_answer();
         cx.notify();
     }
@@ -212,10 +245,18 @@ impl Shell {
                 request,
                 choices,
                 resolved,
+                ..
             } => {
                 let pending = resolved.is_none() && request.is_some();
                 let resolution = resolved.clone();
                 let buttons = choices.clone();
+                // One primary action only: the first way to allow. Other allow
+                // options are secondary, and Deny never looks like the default.
+                let primary_choice = buttons
+                    .iter()
+                    .position(|(_, choice)| !matches!(choice, PermissionChoice::Deny));
+                let hover = theme.hover_wash();
+                let danger_wash = theme.danger.opacity(0.10);
                 div()
                     .id(("approval-card", message_index * 32 + part_index))
                     .w(px(metrics::CARD_WIDTH))
@@ -231,7 +272,7 @@ impl Shell {
                     .child(
                         div()
                             .text_size(px(typo::TINY))
-                            .text_color(theme.ink_tertiary)
+                            .text_color(theme.ink_secondary)
                             .child(kicker.clone()),
                     )
                     .child(
@@ -263,8 +304,10 @@ impl Shell {
                             })
                             .when(pending, |this| {
                                 this.children(buttons.iter().enumerate().map(
-                                    |(choice_index, (label, allow))| {
-                                        let primary = *allow;
+                                    |(choice_index, (label, choice))| {
+                                        let deny = matches!(choice, PermissionChoice::Deny);
+                                        let primary = !deny
+                                            && primary_choice == Some(choice_index);
                                         div()
                                             .id((
                                                 "approval-choice",
@@ -278,10 +321,15 @@ impl Shell {
                                             .when(primary, |this| {
                                                 this.bg(theme.accent).text_color(theme.on_accent)
                                             })
-                                            .when(!primary, |this| {
+                                            .when(!primary && !deny, |this| {
                                                 this.border_1()
                                                     .border_color(theme.hairline)
                                                     .text_color(theme.ink_secondary)
+                                                    .hover(move |style| style.bg(hover))
+                                            })
+                                            .when(deny, |this| {
+                                                this.text_color(theme.danger)
+                                                    .hover(move |style| style.bg(danger_wash))
                                             })
                                             .cursor_pointer()
                                             .flex()
@@ -377,6 +425,9 @@ impl Shell {
                                                 theme.ink
                                             } else {
                                                 theme.hairline
+                                            })
+                                            .when(chosen, |this| {
+                                                this.bg(theme.ink.opacity(0.06))
                                             })
                                             .cursor_pointer()
                                             .flex()

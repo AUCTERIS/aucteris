@@ -76,9 +76,18 @@ impl Shell {
                 // Same as the form's picker: Enter takes the first match.
                 let query = self.panel_picker.search.trim().to_lowercase();
                 let rail = self.panel_picker.rail.clone();
-                if let Some(matched) = provider_choices(&self.engine)
-                    .iter()
-                    .find(|choice| choice_matches(choice, rail.as_deref(), &query))
+                let current = self
+                    .workspace
+                    .selected_bot()
+                    .and_then(|id| self.workspace.bot(id))
+                    .map(|bot| bot.runtime.to_string());
+                if let Some(matched) = provider_choices(
+                    &self.engine,
+                    &self.settings.disabled_runtimes,
+                    current.as_deref(),
+                )
+                .iter()
+                .find(|choice| choice_matches(choice, rail.as_deref(), &query))
                 {
                     let choice = matched.id.clone();
                     self.apply_provider_choice(PickerHost::Panel, choice, cx);
@@ -225,7 +234,11 @@ impl Shell {
 
         // Unique providers in catalog order, each with its brand icon.
         let mut providers: Vec<(&'static str, &'static str)> = Vec::new();
-        for choice in provider_choices(&self.engine) {
+        for choice in provider_choices(
+            &self.engine,
+            &self.settings.disabled_runtimes,
+            Some(current),
+        ) {
             if !providers.iter().any(|(name, _)| *name == choice.provider) {
                 providers.push((choice.provider, choice.icon));
             }
@@ -278,7 +291,11 @@ impl Shell {
 
         // 3. Right List Area: provider defaults first, then the models each
         // agent exposes — the same shape Komet uses for agent model pickers.
-        let choices = provider_choices(&self.engine);
+        let choices = provider_choices(
+            &self.engine,
+            &self.settings.disabled_runtimes,
+            Some(current),
+        );
         let mut filtered_items: Vec<AnyElement> = Vec::new();
 
         for choice in choices

@@ -3,7 +3,7 @@
 
 use gpui::{
     Animation, AnimationExt, AnyElement, App, ClickEvent, FontWeight, Hsla, IntoElement,
-    SharedString, Window, div, img, prelude::*, px, svg,
+    SharedString, Window, div, prelude::*, px, svg,
 };
 use std::time::Duration;
 
@@ -21,7 +21,7 @@ pub fn icon(glyph: &'static str, size: f32, color: Hsla) -> AnyElement {
         .into_any_element()
 }
 
-/// A bot's Grok mascot mark: the original shape mask tinted with the bot's color.
+/// A softly beveled mascot cube. Working bots blink; the cube stays still on hover.
 pub fn mascot(
     shape: MascotShape,
     color: Hsla,
@@ -29,84 +29,95 @@ pub fn mascot(
     size: f32,
     id: usize,
 ) -> AnyElement {
-    let rgb = hsla_to_rgb(color);
-    if presence == Presence::Working {
-        let shape = shape.id_str();
-        let frames = mascot_motion_frames(id);
-        let animations = frames
-            .iter()
-            .map(|(_, milliseconds)| Animation::new(Duration::from_millis(*milliseconds)))
-            .collect();
+    let shape_id = shape.id_str();
+    let shape_path = SharedString::from(format!("icons/mascots/shape-{shape_id}.svg"));
+    let volume_path = SharedString::from(format!("icons/mascots/volume-{shape_id}.svg"));
+    let shade = gpui::hsla(
+        color.h,
+        color.s,
+        (color.l * 0.48).clamp(0.05, 0.36),
+        color.a,
+    );
+    let shadow = svg()
+        .path(shape_path.clone())
+        .absolute()
+        .left_0()
+        .top(px(size * 0.07))
+        .size(px(size))
+        .text_color(shade);
+    let body = svg()
+        .path(shape_path)
+        .absolute()
+        .left_0()
+        .top_0()
+        .size(px(size))
+        .text_color(color);
+    let volume = svg()
+        .path(volume_path)
+        .absolute()
+        .left_0()
+        .top_0()
+        .size(px(size));
+    let (eye_y, eye_x_left, eye_x_right, _) = mascot_eye_geometry(shape);
+    let eye_width = size * 0.145;
+    let eye_height = size * 0.185;
+    let eye_top = eye_y * size / 32.0 - eye_height * 0.5;
+    let eye = |left: f32| {
         div()
-            .flex_shrink_0()
-            .size(px(size))
-            .with_animations(("grok-mascot", id), animations, move |element, index, _| {
-                let frame = frames[index].0;
-                let path = format!(
-                    "mascots/animated/{shape}-{:02x}{:02x}{:02x}-{frame}.png",
-                    rgb[0], rgb[1], rgb[2]
-                );
-                element.child(img(SharedString::from(path)).size(px(size)).flex_shrink_0())
-            })
-            .into_any_element()
+            .absolute()
+            .left(px(left * size / 32.0 - eye_width * 0.5))
+            .top(px(eye_top))
+            .w(px(eye_width))
+            .h(px(eye_height))
+            .rounded(px(size * 0.07))
+            .bg(gpui::hsla(0.0, 0.0, 1.0, 1.0))
+    };
+    let eyes = div()
+        .absolute()
+        .inset_0()
+        .child(eye(eye_x_left))
+        .child(eye(eye_x_right));
+    let eyes: AnyElement = if presence == Presence::Working {
+        // A short eyelid close at the end of a slow, per-bot cycle.
+        let period = 3_200 + (id as u64 % 5) * 180;
+        eyes.with_animation(
+            ("mascot-eye-blink", id),
+            Animation::new(Duration::from_millis(period))
+                .repeat()
+                .with_easing(|progress| match progress {
+                    p if (0.92..0.94).contains(&p) => 0.45,
+                    p if (0.94..0.965).contains(&p) => 0.02,
+                    p if (0.965..0.985).contains(&p) => 0.45,
+                    _ => 1.0,
+                }),
+            |element, opacity| element.opacity(opacity),
+        )
+        .into_any_element()
     } else {
-        img(SharedString::from(format!(
-            "mascots/tint/{}-{:02x}{:02x}{:02x}.png",
-            shape.id_str(),
-            rgb[0],
-            rgb[1],
-            rgb[2]
-        )))
+        eyes.into_any_element()
+    };
+    div()
+        .relative()
         .flex_shrink_0()
         .size(px(size))
+        .child(shadow)
+        .child(body)
+        .child(volume)
+        .child(eyes)
         .into_any_element()
+}
+
+fn mascot_eye_geometry(shape: MascotShape) -> (f32, f32, f32, f32) {
+    match shape {
+        MascotShape::Circle
+        | MascotShape::Diamond
+        | MascotShape::Hexagon
+        | MascotShape::Octagon
+        | MascotShape::Square => (16.0, 12.2, 19.8, 2.8),
+        MascotShape::Pentagon => (17.5, 12.2, 19.8, 2.8),
+        MascotShape::Star => (17.0, 12.9, 19.1, 2.2),
+        MascotShape::Triangle => (20.0, 12.2, 19.8, 2.8),
     }
-}
-
-fn hsla_to_rgb(color: Hsla) -> [u8; 3] {
-    let hue = color.h.rem_euclid(1.0) * 6.0;
-    let chroma = (1.0 - (2.0 * color.l - 1.0).abs()) * color.s;
-    let x = chroma * (1.0 - (hue.rem_euclid(2.0) - 1.0).abs());
-    let (r, g, b) = match hue as u8 {
-        0 => (chroma, x, 0.0),
-        1 => (x, chroma, 0.0),
-        2 => (0.0, chroma, x),
-        3 => (0.0, x, chroma),
-        4 => (x, 0.0, chroma),
-        _ => (chroma, 0.0, x),
-    };
-    let m = color.l - chroma / 2.0;
-    [r, g, b].map(|channel| ((channel + m).clamp(0.0, 1.0) * 255.0).round() as u8)
-}
-
-/// The Grok face strip has 29 poses: a long rest, a short blink, and three
-/// possible small glances. Frame holds match Grok's transition timings.
-fn mascot_motion_frames(id: usize) -> Vec<(u32, u64)> {
-    let rest = 2_600 + (id as u64 % 5) * 170;
-    let mut frames = vec![(0, rest)];
-    frames.extend([
-        (1, 18),
-        (2, 18),
-        (3, 18),
-        (4, 35),
-        (5, 75),
-        (6, 75),
-        (7, 75),
-        (0, 50),
-    ]);
-    let glance = 8 + ((id / 7) % 3) as u32 * 7;
-    frames.push((0, rest));
-    frames.extend([
-        (glance, 45),
-        (glance + 1, 45),
-        (glance + 2, 45),
-        (glance + 3, 700 + (id as u64 % 5) * 40),
-        (glance + 4, 45),
-        (glance + 5, 45),
-        (glance + 6, 45),
-        (0, 50),
-    ]);
-    frames
 }
 
 /// A room's mark: a small team glyph colored by its first member.
@@ -143,7 +154,7 @@ pub fn presence_dot(presence: Presence, theme: &Theme, size: f32) -> AnyElement 
 pub fn chip(label: impl Into<SharedString>, theme: &Theme) -> AnyElement {
     div()
         .flex_shrink_0()
-        .h(px(20.0))
+        .h(px(metrics::CONTROL_XS))
         .px(px(8.0))
         .flex()
         .items_center()
@@ -165,7 +176,7 @@ pub fn chip_with_icon(
 ) -> AnyElement {
     div()
         .flex_shrink_0()
-        .h(px(20.0))
+        .h(px(metrics::CONTROL_XS))
         .px(px(8.0))
         .flex()
         .items_center()
@@ -195,7 +206,7 @@ where
     div()
         .id(id)
         .flex_shrink_0()
-        .size(px(26.0))
+        .size(px(metrics::ICON_BUTTON))
         .flex()
         .items_center()
         .justify_center()
@@ -223,7 +234,7 @@ where
     div()
         .id(id)
         .flex_shrink_0()
-        .h(px(26.0))
+        .h(px(metrics::CONTROL_XS))
         .px(px(10.0))
         .flex()
         .items_center()
@@ -267,8 +278,8 @@ where
     div()
         .id(id)
         .flex_shrink_0()
-        .w(px(34.0))
-        .h(px(20.0))
+        .w(px(metrics::SWITCH_WIDTH))
+        .h(px(metrics::SWITCH_HEIGHT))
         .p(px(2.0))
         .flex()
         .items_center()
@@ -352,8 +363,7 @@ pub fn compact_count(value: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{compact_count, hsla_to_rgb, mascot_motion_frames};
-    use gpui::hsla;
+    use super::compact_count;
 
     #[test]
     fn compact_count_scales_units() {
@@ -364,28 +374,5 @@ mod tests {
         assert_eq!(compact_count(999_999), "999k");
         assert_eq!(compact_count(1_000_000), "1.0M");
         assert_eq!(compact_count(2_500_000), "2.5M");
-    }
-
-    #[test]
-    fn mascot_motion_frames_bookend_on_rest() {
-        for id in [0usize, 1, 7, 42] {
-            let frames = mascot_motion_frames(id);
-            assert!(frames.len() > 4);
-            assert_eq!(frames.first().map(|(glyph, _)| *glyph), Some(0));
-            assert_eq!(frames.last().map(|(glyph, _)| *glyph), Some(0));
-            // Durations are all positive.
-            assert!(frames.iter().all(|(_, ms)| *ms > 0));
-        }
-    }
-
-    #[test]
-    fn hsla_to_rgb_handles_extremes() {
-        assert_eq!(hsla_to_rgb(hsla(0.0, 0.0, 0.0, 1.0)), [0, 0, 0]);
-        assert_eq!(hsla_to_rgb(hsla(0.0, 0.0, 1.0, 1.0)), [255, 255, 255]);
-        // Deterministic: same input, same output.
-        assert_eq!(
-            hsla_to_rgb(hsla(0.7, 0.8, 0.6, 1.0)),
-            hsla_to_rgb(hsla(0.7, 0.8, 0.6, 1.0))
-        );
     }
 }

@@ -3,13 +3,21 @@
 
 use gpui::{AnyElement, Context, SharedString, Styled, div, prelude::*, px};
 
+use crate::domain::model::Presence;
 use crate::presentation::theme::{Theme, metrics, text as typo};
 use crate::presentation::ui::shell::Shell;
 use crate::presentation::ui::widgets;
 
 impl Shell {
     pub(super) fn status_strip(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let running = self.running();
+        let running = self.running_here();
+        // The strip mirrors the bot's actual presence: a run waiting on an
+        // approval is `Waiting`, not `Working`.
+        let presence = self
+            .run_bot
+            .and_then(|id| self.workspace.bot(id))
+            .map(|bot| bot.presence)
+            .unwrap_or(Presence::Working);
         let label: SharedString = match (&self.status, running) {
             (Some(status), true) => status.clone(),
             _ => {
@@ -46,13 +54,23 @@ impl Shell {
                     .items_center()
                     .gap(px(metrics::SPACE_2))
                     .child(if running {
-                        widgets::presence_dot(crate::domain::model::Presence::Working, theme, 6.0)
+                        widgets::presence_dot(presence, theme, metrics::PRESENCE_DOT)
                     } else {
                         div()
-                            .size(px(6.0))
+                            .size(px(metrics::PRESENCE_DOT))
                             .rounded_full()
                             .bg(theme.ink_tertiary.opacity(0.35))
                             .into_any_element()
+                    })
+                    .when(running, |this| {
+                        // Never let the dot carry the state alone.
+                        this.child(
+                            div()
+                                .flex_shrink_0()
+                                .text_size(px(typo::TINY))
+                                .text_color(theme.ink_secondary)
+                                .child(presence.label()),
+                        )
                     })
                     .child(
                         div()
@@ -85,7 +103,7 @@ impl Shell {
                                         cx,
                                     )
                                 }))
-                                .child(widgets::icon("stop", 9.0, stop_color))
+                                .child(widgets::icon("stop", metrics::ICON_TINY, stop_color))
                                 .child("Stop"),
                         )
                     })
