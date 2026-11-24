@@ -24,7 +24,6 @@ gpui_platform = { git = "https://github.com/jomvick/zed", rev = "e2ddcc6805f8c50
 # wire (Claude stream-json, Codex app-server, ACP for opencode/devin/grok).
 komet-harness = { git = "https://github.com/jomvick/komet.git", rev = "5f7320d246e515c4d43af8a832c0b5a978749e4f" }
 komet-proto = { git = "https://github.com/jomvick/komet.git", rev = "5f7320d246e515c4d43af8a832c0b5a978749e4f" }
-image = { version = "0.25.10", default-features = false, features = ["png"] }
 libc = "0.2"
 reqwest = "0.13"
 restate-sdk = { version = "0.13", features = ["reqwest-client"] }
