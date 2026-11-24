@@ -88,10 +88,10 @@ d'empiler des features.
 - [ ] **Design tokens** centralisés (espacements, rayons, typographie, couleurs,
       animations) dans [theme.rs](apps/desktop/src/presentation/theme.rs), consommés
       partout — plus de valeurs magiques.
-- [ ] **Layout workspace** : shell redessiné — sidebar chats/rooms, zone de conversation,
+- [x] **Layout workspace** : shell redessiné — sidebar chats/rooms, zone de conversation,
       panneau latéral du bot, barre de statut ; hiérarchie visuelle claire et densité
       maîtrisée.
-- [ ] **Identité visuelle propre** : palette signature, jeu d'icônes cohérent, mascottes
+- [x] **Identité visuelle propre** : palette signature, jeu d'icônes cohérent, mascottes
       réutilisées systématiquement, accents par bot.
 - [ ] **Onboarding premier lancement** : création du premier bot guidée, états vides
       soignés.
