@@ -11,6 +11,8 @@ use crate::presentation::theme::{Theme, metrics, text as typo};
 use crate::presentation::ui::shell::Shell;
 use crate::presentation::ui::widgets;
 
+type FileDiffRow = (Option<usize>, Option<usize>, char, String, gpui::Hsla);
+
 fn pulsing_icon(icon: AnyElement, id: (&'static str, usize)) -> AnyElement {
     div()
         .flex_shrink_0()
@@ -71,7 +73,7 @@ fn public_tool_detail(label: &str, detail: Option<&str>) -> Option<String> {
 fn file_diff_view(old: &str, new: &str, theme: &Theme) -> AnyElement {
     let old_lines: Vec<_> = old.lines().collect();
     let new_lines: Vec<_> = new.lines().collect();
-    let mut rows: Vec<(Option<usize>, Option<usize>, char, String, gpui::Hsla)> = Vec::new();
+    let mut rows: Vec<FileDiffRow> = Vec::new();
     let (mut old_index, mut new_index) = (0usize, 0usize);
     let can_align = old_lines.len().saturating_mul(new_lines.len()) <= 100_000;
     if can_align {
@@ -393,10 +395,10 @@ fn flatten_json(
             for (key, value) in object {
                 match value {
                     serde_json::Value::Object(_) | serde_json::Value::Array(_) => {
-                        rows.push((depth, format!("{key}:").into(), String::new(), true));
+                        rows.push((depth, format!("{key}:"), String::new(), true));
                         flatten_json(value, depth + 1, rows);
                     }
-                    _ => rows.push((depth, format!("{key}:").into(), value.to_string(), true)),
+                    _ => rows.push((depth, format!("{key}:"), value.to_string(), true)),
                 }
             }
         }
@@ -404,10 +406,10 @@ fn flatten_json(
             for (index, value) in array.iter().enumerate() {
                 match value {
                     serde_json::Value::Object(_) | serde_json::Value::Array(_) => {
-                        rows.push((depth, format!("[{index}]").into(), String::new(), true));
+                        rows.push((depth, format!("[{index}]"), String::new(), true));
                         flatten_json(value, depth + 1, rows);
                     }
-                    _ => rows.push((depth, format!("[{index}]").into(), value.to_string(), true)),
+                    _ => rows.push((depth, format!("[{index}]"), value.to_string(), true)),
                 }
             }
         }

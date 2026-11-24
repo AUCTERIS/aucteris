@@ -465,6 +465,7 @@ impl Shell {
         )
     }
 
+    #[allow(clippy::too_many_arguments)] // Explicit view dependencies keep call sites readable.
     fn context_menu_entry(
         &self,
         theme: &Theme,
@@ -852,6 +853,7 @@ impl Shell {
             .into_any_element()
     }
 
+    #[allow(clippy::too_many_arguments)] // Row builder mirrors the visible bot-row fields.
     fn sidebar_bot_row(
         &self,
         theme: &Theme,

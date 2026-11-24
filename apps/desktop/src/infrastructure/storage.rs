@@ -780,6 +780,10 @@ mod tests {
                 path: "src/main.rs".to_string(),
                 added: 10,
                 removed: 2,
+                old_text: None,
+                new_text: None,
+                diff_expanded: false,
+                undo_error: None,
                 undone: false,
             },
             Part::Note {
@@ -915,6 +919,8 @@ mod tests {
         let storage = AppStorage::new(dir.path());
         let settings = Settings {
             mode: Mode::Advanced,
+            appearance: Some(crate::domain::model::AppearancePreference::Dark),
+            disabled_runtimes: Vec::new(),
             default_runtime: "grok".to_string(),
             send_on_enter: false,
         };

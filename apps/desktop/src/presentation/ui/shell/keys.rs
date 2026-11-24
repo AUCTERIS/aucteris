@@ -40,12 +40,12 @@ impl Shell {
         let modifiers = event.keystroke.modifiers;
         self.caret_visible = true;
         if (modifiers.control || modifiers.platform) && event.keystroke.key == "v" {
-            if let Some(item) = cx.read_from_clipboard() {
-                if let Some(text) = item.text() {
-                    self.draft
-                        .push_str(&text.replace("\r\n", "\n").replace('\r', "\n"));
-                    cx.notify();
-                }
+            if let Some(item) = cx.read_from_clipboard()
+                && let Some(text) = item.text()
+            {
+                self.draft
+                    .push_str(&text.replace("\r\n", "\n").replace('\r', "\n"));
+                cx.notify();
             }
             cx.stop_propagation();
             window.prevent_default();

@@ -363,8 +363,7 @@ impl Shell {
                                         if crate::application::engine::Engine::runtime_base(
                                             &this.settings.default_runtime,
                                         ) == cli_id
-                                        {
-                                            if let Some(next) =
+                                            && let Some(next) =
                                                 this.engine.available_runtimes().iter().find(
                                                     |candidate| {
                                                         candidate.id != cli_id
@@ -375,9 +374,8 @@ impl Shell {
                                                                 .any(|id| id == candidate.id)
                                                     },
                                                 )
-                                            {
-                                                this.settings.default_runtime = next.id.to_string();
-                                            }
+                                        {
+                                            this.settings.default_runtime = next.id.to_string();
                                         }
                                     } else {
                                         this.settings.disabled_runtimes.retain(|id| id != &cli_id);
