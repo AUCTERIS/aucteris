@@ -9,7 +9,8 @@ name: review-triage
 # never checks out or executes PR code — gh api / gh pr diff are read-only.
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
+    # `edited` lets the template reminder clear itself once the body is fixed.
+    types: [opened, synchronize, reopened, ready_for_review, edited]
 
 permissions: {}
 
@@ -160,10 +161,19 @@ jobs:
           missing=""
           grep -q '## Summary' <<<"$BODY" || missing="$missing Summary"
           grep -q '## Security notes' <<<"$BODY" || missing="$missing Security-notes"
-          [ -z "$missing" ] && exit 0
-          gh pr comment "$PR" --repo "$REPO" --body "$(cat <<EOF
-          <!-- aucteris-reviewer -->
+          existing=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.body | contains("<!-- aucteris-reviewer:template -->")) | .id' | head -1)
+          if [ -z "$missing" ]; then
+            [ -n "$existing" ] && gh api "repos/$REPO/issues/comments/$existing" -X DELETE >/dev/null || true
+            exit 0
+          fi
+          comment="<!-- aucteris-reviewer:template -->
           PR template incomplete — missing section(s):$missing.
-          Please fill the template so reviewers can verify trust-boundary impact.
-          EOF
-          )"
+          Please fill the template so reviewers can verify trust-boundary impact."
+          # shellcheck disable=SC2001
+          comment=$(sed 's/^ *//' <<<"$comment")
+          if [ -n "$existing" ]; then
+            gh api "repos/$REPO/issues/comments/$existing" -X PATCH -f body="$comment" >/dev/null
+          else
+            gh api "repos/$REPO/issues/$PR/comments" -X POST -f body="$comment" >/dev/null
+          fi
