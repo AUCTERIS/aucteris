@@ -233,10 +233,34 @@ de nouvelle DA ni d'animation au survol.
   rendu `Element` et tokens de thème manquants). Le composer reste donc sur son
   implémentation existante ; la couverture IME/sélection reste ouverte.
 
-**Critères encore ouverts avant de déclarer la phase complète** : centralisation de
-toutes les mutations UI (réglages provider, panneaux/dialogues), composants de saisie
-réutilisables, focus des menus/cartes/dialogues, seuil de repli du panneau en fenêtre
-étroite, validation de formulaire, tokenisation des valeurs locales restantes,
-contrastes AA et vérification manuelle des parcours en dark/light. Les cases de la
-grille de vérification restent volontairement vides tant que les écrans réels n'ont
-pas été rejoués.
+À la fin du lot 2, ces critères étaient encore ouverts. Leur état de clôture est
+consigné dans le lot 3 ci-dessous.
+
+## 8. Lot 3 — clôture de Phase 1 (2026-11-24)
+
+La base visuelle reste celle de l'interface actuelle ; aucune nouvelle direction
+graphique ni animation au survol n'est introduite.
+
+- **Actions et persistance** : mutations des réglages runtime, visibilité provider,
+  épinglage/suppression, sandbox, dossiers autorisés, bots et équipes passent par
+  `UiAction`. Les actions d'interface persistées déclenchent une seule sauvegarde.
+- **Navigation et focus** : menu de création, lignes de contexte, cartes d'approbation
+  et de question, choix provider, réglages et dialogues ont rôles/libellés accessibles,
+  focus clavier visible et parcours de tabulation ; les dialogues gardent le focus
+  dans leur groupe.
+- **Fenêtre étroite** : le panneau droit se replie sous 1 100 px sans modifier la
+  préférence d'ouverture ; un test couvre le seuil.
+- **Tokens et contraste** : les dimensions locales `px(n)` des vues compilées sont
+  remplacées par des tokens de `theme.rs`. Les tests vérifient contraste AA des textes
+  et indicateurs de focus sur les surfaces dark et light.
+- **Tests de saisie et composants** : tests du caret/placeholder, des widgets et des
+  dialogues ; onboarding, navigation, réglages et repli responsive testés également.
+- **Saisie riche/IME** : le module expérimental `text_input.rs` reste hors compilation,
+  car il cible une API GPUI différente. Le composer visuel existant est conservé ;
+  sélection avancée, presse-papiers et IME restent un suivi séparé.
+
+`cargo fmt --all --check`, `cargo check -p aucteris-desktop --locked`,
+`cargo clippy -p aucteris-desktop --all-targets --locked -- -D warnings`,
+`cargo test -p aucteris-desktop --locked` et `git diff --check` passent. La grille
+de scénarios dark/light reste une vérification manuelle à exécuter dans l'application ;
+elle ne bloque pas la clôture des critères UI automatisables de cette phase.

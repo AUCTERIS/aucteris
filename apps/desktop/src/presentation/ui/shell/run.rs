@@ -518,6 +518,11 @@ impl Shell {
     /// Stop the run in flight. The answer keeps whatever arrived, marked as
     /// stopped, so nothing already useful disappears.
     pub(crate) fn stop_run(&mut self, cx: &mut Context<Self>) {
+        self.stop_run_without_persist(cx);
+        self.persist_workspace();
+    }
+
+    pub(crate) fn stop_run_without_persist(&mut self, cx: &mut Context<Self>) {
         // Cancelling the consumer drops the event receiver, so nothing the
         // engine still emits can reach the workspace.
         self.run_task = None;
@@ -542,7 +547,6 @@ impl Shell {
         self.free_text_question = None;
         self.close_cards();
         self.status = None;
-        self.persist_workspace();
         cx.notify();
     }
 }

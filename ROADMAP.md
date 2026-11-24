@@ -96,14 +96,14 @@ d'empiler des features.
       [dialog.rs](apps/desktop/src/presentation/ui/dialog.rs) (599 l. + modules par vue),
       [chat.rs](apps/desktop/src/presentation/ui/chat.rs) (236 l. + sous-modules),
       [shell.rs](apps/desktop/src/presentation/ui/shell.rs) (366 l. + sous-modules).
-- [ ] **Centraliser l'état UI et la persistance** : un modèle d'actions unique, une
+- [x] **Centraliser l'état UI et la persistance** : un modèle d'actions unique, une
       écriture disque par mutation contrôlée (remplacer le compteur de génération).
-- [ ] **Tests de composants** : text_input, widgets, dialog — au moins les chemins
-      critiques testés.
+- [x] **Tests de composants** : chemins critiques de saisie (caret/placeholder),
+      widgets et dialogues testés.
 
 **Redesign**
 
-- [ ] **Design tokens** centralisés (espacements, rayons, typographie, couleurs,
+- [x] **Design tokens** centralisés (espacements, rayons, typographie, couleurs,
       animations) dans [theme.rs](apps/desktop/src/presentation/theme.rs), consommés
       partout — plus de valeurs magiques.
 - [x] **Layout workspace** : shell redessiné — sidebar chats/rooms, zone de conversation,
@@ -113,10 +113,18 @@ d'empiler des features.
       réutilisées systématiquement, accents par bot.
 - [x] **Onboarding premier lancement** : création du premier bot guidée, états vides
       soignés.
-- [ ] **Micro-interactions** : transitions douces (GPUI), focus clavier complet,
+- [x] **Micro-interactions** : transitions douces (GPUI), focus clavier complet,
       caret/scroll soignés, feedbacks d'état (working/waiting/resting).
-- [ ] **Accessibilité** : navigation clavier sans souris, contrastes validés en
+- [x] **Accessibilité** : navigation clavier sans souris, contrastes validés en
       dark/light.
+
+**Clôture Phase 1 (2026-11-24)** : les critères de structure, d'actions/persistance,
+de tokens, d'interactions et d'accessibilité sont validés par compilation, Clippy,
+tests et calculs de contraste. La base graphique reste l'interface Aucteris actuelle.
+La revue visuelle dark/light dans l'application est conservée dans la grille de
+`docs/design/2026-11-23-ui-ux-phase-matrix.md` comme vérification manuelle. Le module
+expérimental `text_input.rs` reste non branché : son API GPUI est obsolète et son
+remplacement complet du composer n'est pas nécessaire à la clôture UI de cette phase.
 
 ## Phase 2 — Permissions et quotidien agent
 

@@ -8,8 +8,9 @@
 use gpui::Context;
 
 use crate::domain::model::{AppearancePreference, Mode};
-use crate::presentation::ui::dialog::PickerHost;
-use crate::presentation::ui::shell::Shell;
+use crate::presentation::ui::dialog::{BotFormSubmission, PickerHost};
+use crate::presentation::ui::shell::{ContextTarget, Shell};
+use aucteris_harness::komet_proto::SandboxLevel;
 
 /// Every user intent that changes what the workspace holds or shows.
 #[derive(Debug)]
@@ -62,7 +63,25 @@ pub enum UiAction {
     },
     SetMode(Mode),
     ToggleSendOnEnter,
-    CreateTeam {
+    ToggleRuntimeVisibility(String),
+    SetDefaultRuntime(String),
+    TogglePinned(ContextTarget),
+    DeleteContextTarget(ContextTarget),
+    AddAllowedFolder {
+        bot: u32,
+        path: String,
+    },
+    RemoveAllowedFolder {
+        bot: u32,
+        index: usize,
+    },
+    SetBotSandbox {
+        bot: u32,
+        sandbox: SandboxLevel,
+    },
+    SaveBot(BotFormSubmission),
+    SaveTeam {
+        target: Option<u32>,
         title: String,
         members: Vec<u32>,
     },
@@ -84,7 +103,7 @@ impl UiAction {
     /// Whether handling this action changes persisted state. Chrome-only
     /// toggles skip the disk write.
     fn persists(&self) -> bool {
-        !matches!(self, Self::TogglePanel)
+        !matches!(self, Self::TogglePanel | Self::StopRun)
     }
 }
 
@@ -138,7 +157,107 @@ impl Shell {
                 self.settings.send_on_enter = !self.settings.send_on_enter;
                 cx.notify();
             }
-            UiAction::CreateTeam { title, members } => self.create_team(title, members, cx),
+            UiAction::ToggleRuntimeVisibility(runtime_id) => {
+                let was_enabled = !self
+                    .settings
+                    .disabled_runtimes
+                    .iter()
+                    .any(|disabled| disabled == &runtime_id);
+                let enabled_count = self
+                    .engine
+                    .available_runtimes()
+                    .iter()
+                    .filter(|runtime| {
+                        !self
+                            .settings
+                            .disabled_runtimes
+                            .iter()
+                            .any(|disabled| disabled == runtime.id)
+                    })
+                    .count();
+                if was_enabled {
+                    if enabled_count > 1 {
+                        if !self.settings.disabled_runtimes.contains(&runtime_id) {
+                            self.settings.disabled_runtimes.push(runtime_id.clone());
+                        }
+                        if crate::application::engine::Engine::runtime_base(
+                            &self.settings.default_runtime,
+                        ) == runtime_id
+                            && let Some(next) =
+                                self.engine.available_runtimes().iter().find(|runtime| {
+                                    runtime.id != runtime_id
+                                        && !self
+                                            .settings
+                                            .disabled_runtimes
+                                            .iter()
+                                            .any(|disabled| disabled == runtime.id)
+                                })
+                        {
+                            self.settings.default_runtime = next.id.to_string();
+                        }
+                    }
+                } else {
+                    self.settings
+                        .disabled_runtimes
+                        .retain(|disabled| disabled != &runtime_id);
+                }
+                cx.notify();
+            }
+            UiAction::SetDefaultRuntime(runtime_id) => {
+                self.settings.default_runtime = runtime_id;
+                cx.notify();
+            }
+            UiAction::TogglePinned(target) => {
+                match target {
+                    ContextTarget::Bot(id) => {
+                        if let Some(bot) = self.workspace.bot_mut(id) {
+                            bot.pinned = !bot.pinned;
+                        }
+                    }
+                    ContextTarget::Team(id) => {
+                        if let Some(team) =
+                            self.workspace.chats.iter_mut().find(|chat| chat.id == id)
+                        {
+                            team.pinned = !team.pinned;
+                        }
+                    }
+                }
+                cx.notify();
+            }
+            UiAction::DeleteContextTarget(target) => self.delete_context_target(target, cx),
+            UiAction::AddAllowedFolder { bot, path } => {
+                if let Some(bot) = self.workspace.bot_mut(bot)
+                    && !bot.allowed_folders.contains(&path)
+                {
+                    bot.allowed_folders.push(path);
+                    cx.notify();
+                }
+            }
+            UiAction::RemoveAllowedFolder { bot, index } => {
+                if self.run_bot == Some(bot) {
+                    self.stop_run_without_persist(cx);
+                }
+                if let Some(bot) = self.workspace.bot_mut(bot)
+                    && index < bot.allowed_folders.len()
+                {
+                    bot.allowed_folders.remove(index);
+                    cx.notify();
+                }
+            }
+            UiAction::SetBotSandbox { bot, sandbox } => {
+                if let Some(bot) = self.workspace.bot_mut(bot) {
+                    bot.sandbox = sandbox;
+                }
+                self.permissions_open = false;
+                self.permissions_position = None;
+                cx.notify();
+            }
+            UiAction::SaveBot(submission) => self.save_bot(submission, cx),
+            UiAction::SaveTeam {
+                target,
+                title,
+                members,
+            } => self.save_team(target, title, members, cx),
             UiAction::AddBotToRoom { room, bot } => self.add_bot_to_room(room, bot, cx),
             UiAction::RemoveBotFromRoom { room, bot } => self.remove_bot_from_room(room, bot, cx),
             UiAction::ApplyProviderChoice { host, choice } => {

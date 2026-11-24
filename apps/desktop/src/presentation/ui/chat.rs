@@ -191,7 +191,7 @@ impl Shell {
                                 bot.id as usize * 1000 + 4,
                             )
                         } else if !chat.members.is_empty() {
-                            let mut stack = div().flex().items_center().gap(px(2.0));
+                            let mut stack = div().flex().items_center().gap(px(metrics::PX_2));
                             for id in chat.members.iter().take(3) {
                                 if let Some(member) = self.workspace.bot(*id) {
                                     stack = stack.child(widgets::mascot(

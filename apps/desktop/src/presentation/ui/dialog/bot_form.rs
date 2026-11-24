@@ -9,7 +9,7 @@ use crate::presentation::theme::{Theme, metrics, text as typo};
 use crate::presentation::ui::shell::Shell;
 use crate::presentation::ui::widgets;
 
-use super::{BotForm, Dialog, Field, PickerHost};
+use super::{BotForm, Dialog, DialogShellPresentation, Field, PickerHost};
 
 impl Shell {
     pub(super) fn bot_form_dialog(
@@ -59,8 +59,15 @@ impl Shell {
 
         let provider_trigger = div()
             .id("form-provider-trigger")
+            .role(gpui::Role::Button)
+            .aria_label("Choose an agent provider")
+            .tab_index(3)
+            .focus_visible({
+                let focus = theme.focus;
+                move |style| style.border_1().border_color(focus)
+            })
             .h(px(metrics::CONTROL_LG))
-            .px(px(10.0))
+            .px(px(metrics::PX_10))
             .flex()
             .items_center()
             .justify_between()
@@ -84,7 +91,7 @@ impl Shell {
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(8.0))
+                    .gap(px(metrics::SPACE_2))
                     .child(widgets::icon(current_icon, 16.0, theme.ink))
                     .child(
                         div()
@@ -118,9 +125,9 @@ impl Shell {
                 this.child(
                     div()
                         .absolute()
-                        .left(px(0.0))
-                        .right(px(0.0))
-                        .bottom(px(42.0))
+                        .left(px(metrics::ZERO))
+                        .right(px(metrics::ZERO))
+                        .bottom(px(metrics::PX_42))
                         .child(self.provider_picker_view(
                             theme,
                             cx,
@@ -139,7 +146,15 @@ impl Shell {
             swatches.push(
                 div()
                     .id(("swatch", slot))
-                    .p(px(2.0))
+                    .role(gpui::Role::Button)
+                    .aria_label(format!("Bot color {}", slot + 1))
+                    .aria_selected(selected)
+                    .tab_index(4 + slot as isize)
+                    .focus_visible({
+                        let focus = theme.focus;
+                        move |style| style.border_1().border_color(focus)
+                    })
+                    .p(px(metrics::PX_2))
                     .rounded_full()
                     .border_1()
                     .border_color(if selected { theme.ink } else { theme.hairline })
@@ -168,7 +183,15 @@ impl Shell {
             mascot_buttons.push(
                 div()
                     .id(("mascot-pick", shape_index))
-                    .p(px(2.0))
+                    .role(gpui::Role::Button)
+                    .aria_label(format!("{} mascot", shape.id_str()))
+                    .aria_selected(selected)
+                    .tab_index(12 + shape_index as isize)
+                    .focus_visible({
+                        let focus = theme.focus;
+                        move |style| style.border_1().border_color(focus)
+                    })
+                    .p(px(metrics::PX_2))
                     .rounded(px(metrics::RADIUS_CONTROL))
                     .border_1()
                     .border_color(if selected { theme.ink } else { theme.hairline })
@@ -281,8 +304,15 @@ impl Shell {
             .child(
                 div()
                     .id("form-create")
-                    .h(px(26.0))
-                    .px(px(12.0))
+                    .role(gpui::Role::Button)
+                    .aria_label(if editing { "Save bot" } else { "Create bot" })
+                    .tab_index(21)
+                    .focus_visible({
+                        let focus = theme.focus;
+                        move |style| style.border_1().border_color(focus)
+                    })
+                    .h(px(metrics::PX_26))
+                    .px(px(metrics::SPACE_3))
                     .flex()
                     .items_center()
                     .rounded_full()
@@ -307,6 +337,16 @@ impl Shell {
             )
             .into_any_element();
 
-        self.dialog_shell(theme, cx, 516.0, header, body, footer)
+        self.dialog_shell(
+            theme,
+            cx,
+            DialogShellPresentation {
+                width: 516.0,
+                label: if editing { "Edit bot" } else { "Create bot" },
+            },
+            header,
+            body,
+            footer,
+        )
     }
 }

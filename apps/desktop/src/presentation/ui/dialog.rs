@@ -77,6 +77,17 @@ pub struct BotForm {
     pub provider: ProviderPicker,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct BotFormSubmission {
+    pub target: Option<u32>,
+    pub name: String,
+    pub role: String,
+    pub instructions: String,
+    pub runtime: String,
+    pub color: usize,
+    pub mascot: MascotShape,
+}
+
 impl BotForm {
     pub fn new(runtime: String, color: usize, focus: [FocusHandle; 3]) -> Self {
         Self {
@@ -284,7 +295,8 @@ impl ProviderPicker {
     /// Back to the top after the filter changes — otherwise a stale offset
     /// can land past the end of a shorter list.
     fn reset_scroll(&mut self) {
-        self.scroll.set_offset(gpui::point(px(0.0), px(0.0)));
+        self.scroll
+            .set_offset(gpui::point(px(metrics::ZERO), px(metrics::ZERO)));
     }
 }
 
@@ -300,6 +312,11 @@ pub enum Dialog {
     Bot(Box<BotForm>),
     Team(TeamForm),
     Settings(SettingsPage),
+}
+
+pub(super) struct DialogShellPresentation {
+    width: f32,
+    label: &'static str,
 }
 
 impl Shell {
@@ -334,14 +351,17 @@ impl Shell {
         &self,
         theme: &Theme,
         cx: &mut Context<Self>,
-        width: f32,
+        presentation: DialogShellPresentation,
         header: AnyElement,
         body: AnyElement,
         footer: AnyElement,
     ) -> AnyElement {
         div()
             .id("dialog")
-            .w(px(width))
+            .role(gpui::Role::Dialog)
+            .aria_label(presentation.label)
+            .tab_group()
+            .w(px(presentation.width))
             .max_h(px(metrics::DIALOG_MAX_HEIGHT))
             .flex()
             .flex_col()
@@ -379,7 +399,7 @@ impl Shell {
                     .flex_1()
                     .flex()
                     .flex_col()
-                    .gap(px(2.0))
+                    .gap(px(metrics::PX_2))
                     .child(
                         div()
                             .text_size(px(typo::SHEET_TITLE))
@@ -400,6 +420,7 @@ impl Shell {
             .child(widgets::icon_button(
                 ("dialog-close", 0),
                 "x",
+                "Close dialog",
                 theme,
                 cx.listener(|this, _event, window, cx| this.close_dialog(window, cx)),
             ))
@@ -451,16 +472,23 @@ impl Shell {
 
         div()
             .id(("field", field.index()))
+            .role(gpui::Role::TextInput)
+            .aria_label(field.label())
+            .tab_index(field.index() as isize)
+            .focus_visible({
+                let focus = theme.focus;
+                move |style| style.border_1().border_color(focus)
+            })
             .h(px(if tall {
                 metrics::CONTROL_LG * 2.4
             } else {
                 metrics::CONTROL_LG
             }))
-            .px(px(10.0))
+            .px(px(metrics::PX_10))
             .flex()
             .items_center()
-            .when(tall, |this| this.items_start().pt(px(9.0)))
-            .gap(px(2.0))
+            .when(tall, |this| this.items_start().pt(px(metrics::PX_9)))
+            .gap(px(metrics::PX_2))
             .overflow_hidden()
             .rounded(px(metrics::RADIUS_CONTROL))
             .bg(theme.inset)
@@ -478,7 +506,7 @@ impl Shell {
                     .when(!tall, |this| this.truncate())
                     .font_family(font)
                     .text_size(px(typo::BODY))
-                    .line_height(px(19.0))
+                    .line_height(px(metrics::PX_19))
                     .text_color(text_color)
                     .child(content),
             )

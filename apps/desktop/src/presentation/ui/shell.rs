@@ -30,6 +30,10 @@ pub(crate) enum ContextTarget {
     Team(u32),
 }
 
+fn show_right_panel(panel_open: bool, window_width: f32) -> bool {
+    panel_open && window_width >= metrics::PANEL_COLLAPSE_WIDTH
+}
+
 pub struct Shell {
     pub(crate) workspace: Workspace,
     pub(crate) engine: Arc<engine::Engine>,
@@ -248,7 +252,7 @@ impl Shell {
     pub(crate) fn follows_bottom(&self) -> bool {
         let offset = self.scroll.offset();
         let max = self.scroll.max_offset();
-        (max.y - offset.y) <= px(24.0)
+        (max.y - offset.y) <= px(metrics::SPACE_5)
     }
 
     /// Scroll only when the person was already reading the latest message.
@@ -287,13 +291,14 @@ impl Render for Shell {
         let context_menu = self.view_context_menu(&theme, cx);
         let overlay = self.view_overlay(&theme, cx);
         let panel_popovers = self.view_panel_popovers(&theme, cx);
+        let show_panel = show_right_panel(self.panel_open, f32::from(window.bounds().size.width));
         let main_pane = div()
             .flex_1()
             .min_w_0()
             .mt(px(metrics::SPACE_2))
             .mb(px(metrics::SPACE_2))
             .ml(px(metrics::SPACE_2))
-            .when(!self.panel_open, |this| this.mr(px(metrics::SPACE_2)))
+            .when(!show_panel, |this| this.mr(px(metrics::SPACE_2)))
             .flex()
             .overflow_hidden()
             .rounded(px(metrics::RADIUS_CARD))
@@ -309,7 +314,7 @@ impl Render for Shell {
                     .child(chat),
             );
 
-        let right_panel = self.panel_open.then(|| {
+        let right_panel = show_panel.then(|| {
             div()
                 .w(px(metrics::PANEL_WIDTH))
                 .mt(px(metrics::SPACE_2))
@@ -363,4 +368,20 @@ fn permission_label(choice: &PermissionChoice) -> String {
 
 fn is_deny(choice: &PermissionChoice) -> bool {
     matches!(choice, PermissionChoice::Deny)
+}
+
+#[cfg(test)]
+mod responsive_tests {
+    use super::show_right_panel;
+    use crate::presentation::theme::metrics;
+
+    #[test]
+    fn right_panel_collapses_below_workspace_threshold_without_changing_preference() {
+        assert!(!show_right_panel(true, metrics::PANEL_COLLAPSE_WIDTH - 1.0));
+        assert!(show_right_panel(true, metrics::PANEL_COLLAPSE_WIDTH));
+        assert!(!show_right_panel(
+            false,
+            metrics::PANEL_COLLAPSE_WIDTH + 1.0
+        ));
+    }
 }

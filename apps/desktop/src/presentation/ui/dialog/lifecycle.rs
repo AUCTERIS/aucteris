@@ -3,8 +3,7 @@
 
 use gpui::{Context, FocusHandle, KeyDownEvent, Window};
 
-use crate::domain::model::{Bot, Chat, Mode, Presence, timestamp_now};
-use aucteris_harness::komet_proto::SandboxLevel;
+use crate::domain::model::Mode;
 
 use super::Shell;
 use super::{BotForm, Dialog, Field, SettingsPage, TeamForm, choice_matches, provider_choices};
@@ -164,6 +163,45 @@ impl Shell {
                 return;
             }
             self.close_dialog(window, cx);
+            return;
+        }
+        if key == "tab"
+            && matches!(
+                self.dialog,
+                Some(Dialog::Settings(_) | Dialog::Team(_) | Dialog::Bot(_))
+            )
+        {
+            if let Some(Dialog::Bot(form)) = self.dialog.as_mut()
+                && form.provider.open
+            {
+                form.provider.open = false;
+                form.active = form.active.next(modifiers.shift);
+                let field = form.active;
+                self.focus_field(field, window, cx);
+                cx.stop_propagation();
+                return;
+            }
+            if !self.dialog_focus.contains_focused(window, cx) {
+                window.focus(&self.dialog_focus, cx);
+            }
+            if modifiers.shift {
+                window.focus_prev(cx);
+            } else {
+                window.focus_next(cx);
+            }
+            if !self.dialog_focus.contains_focused(window, cx) {
+                window.focus(&self.dialog_focus, cx);
+                window.focus_next(cx);
+            }
+            if let Some(Dialog::Bot(form)) = self.dialog.as_mut() {
+                for field in [Field::Name, Field::Role, Field::Instructions] {
+                    if form.focus[field.index()].is_focused(window) {
+                        form.active = field;
+                        break;
+                    }
+                }
+            }
+            cx.stop_propagation();
             return;
         }
         // The team form is a single field: type, delete, Enter commits.
@@ -332,89 +370,19 @@ impl Shell {
         } else {
             form.instructions.trim().to_string()
         };
-        let runtime = form.runtime.clone();
-
-        // Editing: everything the form owns changes in place, in the same order
-        // the panel shows it. The chat title follows the name.
-        if let Some(id) = form.target {
-            if let Some(bot) = self.workspace.bot_mut(id) {
-                bot.name = name.clone().into();
-                bot.role = role.clone().into();
-                bot.runtime = runtime.clone().into();
-                bot.instructions = instructions.into();
-                bot.color = form.color;
-                bot.mascot = form.mascot;
-            }
-            if let Some(chat) = self
-                .workspace
-                .chats
-                .iter_mut()
-                .find(|chat| chat.bot == Some(id))
-            {
-                chat.title = name.into();
-            }
-            window.focus(&self.focus, cx);
-            self.persist_workspace();
-            cx.notify();
-            return;
-        }
-
-        let id = self
-            .workspace
-            .bots
-            .iter()
-            .map(|bot| bot.id)
-            .max()
-            .unwrap_or(0)
-            + 1;
-        let chat_id = self
-            .workspace
-            .chats
-            .iter()
-            .map(|chat| chat.id)
-            .max()
-            .unwrap_or(0)
-            + 1;
-        let folder = crate::infrastructure::storage::AppStorage::bot_workspace_path(
-            &crate::infrastructure::storage::AppStorage::data_dir(),
-            id,
+        self.dispatch(
+            crate::presentation::ui::action::UiAction::SaveBot(super::BotFormSubmission {
+                target: form.target,
+                name,
+                role,
+                instructions,
+                runtime: form.runtime,
+                color: form.color,
+                mascot: form.mascot,
+            }),
+            cx,
         );
-
-        self.workspace.bots.push(Bot {
-            id,
-            pinned: false,
-            name: name.clone().into(),
-            role: role.clone().into(),
-            color: form.color,
-            mascot: form.mascot,
-            runtime: runtime.clone().into(),
-            presence: Presence::Resting,
-            activity: "Ready".into(),
-            folder: folder.to_string_lossy().to_string().into(),
-            allowed_folders: Vec::new(),
-            instructions: instructions.into(),
-            tokens: 0,
-            context_limit: None,
-            sandbox: SandboxLevel::WorkspaceWrite,
-        });
-        self.workspace.chats.push(Chat {
-            id: chat_id,
-            pinned: false,
-            title: name.clone().into(),
-            bot: Some(id),
-            members: Vec::new(),
-            messages: Vec::new(),
-            preview: "Ready for your first task".into(),
-            time: timestamp_now(),
-            session_id: None,
-        });
-        self.stash_draft();
-        self.workspace.selected = self.workspace.chats.len() - 1;
-        self.restore_draft();
-        self.scroll.scroll_to_bottom();
         window.focus(&self.focus, cx);
-        self.persist_workspace();
-        cx.notify();
     }
 
     /// Create the team the form describes and land on its chat.
@@ -426,29 +394,8 @@ impl Shell {
             self.dialog = Some(Dialog::Team(form));
             return;
         }
-        let title = form.title.trim().to_string();
-        if let Some(team_id) = form.target {
-            if let Some(team) = self
-                .workspace
-                .chats
-                .iter_mut()
-                .find(|chat| chat.id == team_id)
-            {
-                team.title = title.into();
-                team.members = form.members;
-                team.preview = if team.members.is_empty() {
-                    "Add bots to start this team".into()
-                } else {
-                    format!("{} bots in this team", team.members.len()).into()
-                };
-            }
-            window.focus(&self.focus, cx);
-            self.persist_workspace();
-            cx.notify();
-            return;
-        }
-        // Members answer in workspace order, not click order.
-        let mut members = form.members.clone();
+
+        let mut members = form.members;
         members.sort_by_key(|id| {
             self.workspace
                 .bots
@@ -458,11 +405,16 @@ impl Shell {
         });
         members.dedup();
         self.dispatch(
-            crate::presentation::ui::action::UiAction::CreateTeam { title, members },
+            crate::presentation::ui::action::UiAction::SaveTeam {
+                target: form.target,
+                title: form.title.trim().to_string(),
+                members,
+            },
             cx,
         );
         window.focus(&self.focus, cx);
     }
+
     pub(crate) fn set_mode(&mut self, mode: Mode, cx: &mut Context<Self>) {
         self.settings.mode = mode;
         cx.notify();

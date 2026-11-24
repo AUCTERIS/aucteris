@@ -90,7 +90,7 @@ impl Shell {
                     .when(!*collapsed, |this| {
                         this.child(
                             div()
-                                .pl(px(23.0))
+                                .pl(px(metrics::PX_23))
                                 .text_size(px(typo::BODY))
                                 .line_height(px(typo::BUBBLE_LINE))
                                 .text_color(theme.ink_secondary)
@@ -195,7 +195,7 @@ impl Shell {
                     let output_for_copy = output.clone();
                     let copy_output = div()
                         .id(("copy-tool-output", motion_id))
-                        .px(px(8.0))
+                        .px(px(metrics::SPACE_2))
                         .h(px(metrics::CONTROL_XS))
                         .flex()
                         .items_center()

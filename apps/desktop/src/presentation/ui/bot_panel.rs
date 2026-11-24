@@ -30,7 +30,7 @@ impl Shell {
                 self.panel_picker_position.map(|position| {
                     // Keep the menu in the conversation column, to the left
                     // of the details panel, and align it around its trigger.
-                    let top = (position.y - px(130.0)).max(px(8.0));
+                    let top = (position.y - px(metrics::PX_130)).max(px(metrics::SPACE_2));
                     div()
                         .absolute()
                         .right(px(metrics::PANEL_WIDTH + metrics::SPACE_4))
@@ -86,13 +86,13 @@ impl Shell {
                                 .cursor_pointer()
                                 .hover(|style| style.bg(theme.raised_hover))
                                 .on_click(cx.listener(move |this, _event, _window, cx| {
-                                    if let Some(bot) = this.workspace.bot_mut(bot_id) {
-                                        bot.sandbox = level;
-                                    }
-                                    this.permissions_open = false;
-                                    this.permissions_position = None;
-                                    this.persist_workspace();
-                                    cx.notify();
+                                    this.dispatch(
+                                        crate::presentation::ui::action::UiAction::SetBotSandbox {
+                                            bot: bot_id,
+                                            sandbox: level,
+                                        },
+                                        cx,
+                                    );
                                 }))
                                 .child(widgets::icon(
                                     if selected { "check" } else { "panel" },
@@ -108,7 +108,7 @@ impl Shell {
                                         .flex_1()
                                         .flex()
                                         .flex_col()
-                                        .gap(px(2.0))
+                                        .gap(px(metrics::PX_2))
                                         .child(
                                             div()
                                                 .text_size(px(typo::META))
@@ -127,7 +127,7 @@ impl Shell {
                         );
                     }
 
-                    let top = (position.y - px(111.0)).max(px(8.0));
+                    let top = (position.y - px(metrics::PX_111)).max(px(metrics::SPACE_2));
                     div()
                         .absolute()
                         .right(px(metrics::PANEL_WIDTH + metrics::SPACE_4))
@@ -212,12 +212,14 @@ impl Shell {
             .child(widgets::icon_button(
                 ("edit-bot", 0),
                 "edit",
+                "Edit bot",
                 theme,
                 cx.listener(move |this, _event, window, cx| this.open_edit_bot(bot_id, window, cx)),
             ))
             .child(widgets::icon_button(
                 ("close-panel", 0),
                 "x",
+                "Close bot panel",
                 theme,
                 cx.listener(|this, _event, _window, cx| {
                     this.dispatch(crate::presentation::ui::action::UiAction::TogglePanel, cx)
@@ -241,7 +243,7 @@ impl Shell {
                     .overflow_hidden()
                     .flex()
                     .flex_col()
-                    .gap(px(2.0))
+                    .gap(px(metrics::PX_2))
                     .child(
                         div()
                             .truncate()
@@ -267,11 +269,11 @@ impl Shell {
         let runtime_chip = div()
             .id("panel-runtime-chip")
             .h(px(metrics::CONTROL_LG))
-            .px(px(10.0))
+            .px(px(metrics::PX_10))
             .flex()
             .items_center()
             .justify_between()
-            .gap(px(8.0))
+            .gap(px(metrics::SPACE_2))
             .rounded(px(metrics::RADIUS_CONTROL))
             .bg(theme.inset)
             .border_1()
@@ -298,7 +300,7 @@ impl Shell {
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(8.0))
+                    .gap(px(metrics::SPACE_2))
                     .min_w_0()
                     .child(widgets::icon(runtime_icon, 16.0, theme.ink))
                     .child(
@@ -364,9 +366,16 @@ impl Shell {
                     .child(widgets::icon_button(
                         ("remove-allowed-folder", bot_id as usize * 1000 + index),
                         "x",
+                        "Remove folder permission",
                         theme,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.remove_allowed_folder(bot_id, index, cx)
+                            this.dispatch(
+                                crate::presentation::ui::action::UiAction::RemoveAllowedFolder {
+                                    bot: bot_id,
+                                    index,
+                                },
+                                cx,
+                            )
                         }),
                     ))
                     .into_any_element(),
@@ -375,10 +384,10 @@ impl Shell {
         let add_folder_button = div()
             .id("add-allowed-folder")
             .h(px(metrics::CONTROL_MD))
-            .px(px(10.0))
+            .px(px(metrics::PX_10))
             .flex()
             .items_center()
-            .gap(px(6.0))
+            .gap(px(metrics::PX_6))
             .rounded(px(metrics::RADIUS_CONTROL))
             .bg(theme.inset)
             .cursor_pointer()
@@ -471,7 +480,7 @@ impl Shell {
                     .child(
                         div()
                             .id("reset-usage")
-                            .h(px(20.0))
+                            .h(px(metrics::CONTROL_MD))
                             .px(px(metrics::SPACE_2))
                             .flex()
                             .items_center()
@@ -574,7 +583,7 @@ impl Shell {
             let color = theme.identity(bot.color);
             members.push(
                 div()
-                    .h(px(40.0))
+                    .h(px(metrics::PX_40))
                     .flex()
                     .items_center()
                     .gap(px(metrics::SPACE_2))
@@ -597,6 +606,7 @@ impl Shell {
                     .child(widgets::icon_button(
                         ("remove-room-member", bot.id as usize),
                         "x",
+                        format!("Remove {} from team", bot.name),
                         theme,
                         cx.listener(move |this, _event, _window, cx| {
                             this.dispatch(
@@ -622,7 +632,7 @@ impl Shell {
             let bot_id = bot.id;
             available_bots.push(
                 div()
-                    .h(px(36.0))
+                    .h(px(metrics::PX_36))
                     .flex()
                     .items_center()
                     .gap(px(metrics::SPACE_2))
@@ -644,6 +654,7 @@ impl Shell {
                     .child(widgets::icon_button(
                         ("add-room-member", bot_id as usize),
                         "plus",
+                        format!("Add {} to team", bot.name),
                         theme,
                         cx.listener(move |this, _event, _window, cx| {
                             this.dispatch(
@@ -670,6 +681,7 @@ impl Shell {
             .child(widgets::icon_button(
                 ("close-panel", 1),
                 "x",
+                "Close bot panel",
                 theme,
                 cx.listener(|this, _event, _window, cx| {
                     this.dispatch(crate::presentation::ui::action::UiAction::TogglePanel, cx)
@@ -777,7 +789,7 @@ impl Shell {
                     .gap(px(metrics::SPACE_1))
                     .child(
                         div()
-                            .max_w(px(190.0))
+                            .max_w(px(metrics::PX_190))
                             .truncate()
                             .text_size(px(typo::META))
                             .text_color(theme.ink)

@@ -96,28 +96,19 @@ impl Shell {
                 ContextTarget::Team(id) => self.open_edit_team(id, window, cx),
             },
             ContextAction::Pin => {
-                match target {
-                    ContextTarget::Bot(id) => {
-                        if let Some(bot) = self.workspace.bot_mut(id) {
-                            bot.pinned = !bot.pinned;
-                        }
-                    }
-                    ContextTarget::Team(id) => {
-                        if let Some(team) =
-                            self.workspace.chats.iter_mut().find(|chat| chat.id == id)
-                        {
-                            team.pinned = !team.pinned;
-                        }
-                    }
-                }
-                self.persist_workspace();
-                cx.notify();
+                self.dispatch(
+                    crate::presentation::ui::action::UiAction::TogglePinned(target),
+                    cx,
+                );
             }
-            ContextAction::Delete => self.delete_context_target(target, cx),
+            ContextAction::Delete => self.dispatch(
+                crate::presentation::ui::action::UiAction::DeleteContextTarget(target),
+                cx,
+            ),
         }
     }
 
-    fn delete_context_target(&mut self, target: ContextTarget, cx: &mut Context<Self>) {
+    pub(crate) fn delete_context_target(&mut self, target: ContextTarget, cx: &mut Context<Self>) {
         let mut remove_chat_ids = Vec::new();
         let removed_bot = match target {
             ContextTarget::Bot(id) => Some(id),
@@ -196,7 +187,6 @@ impl Shell {
                 .and_then(|chat| self.drafts.remove(&chat.id))
                 .unwrap_or_default();
         }
-        self.persist_workspace();
         cx.notify();
     }
 
@@ -240,6 +230,13 @@ impl Shell {
             .child(
                 div()
                     .id("sidebar-search-button")
+                    .role(gpui::Role::Button)
+                    .aria_label("Search bots and teams")
+                    .tab_index(0)
+                    .focus_visible({
+                        let focus = theme.focus;
+                        move |style| style.border_1().border_color(focus)
+                    })
                     .size(px(metrics::CONTROL_LG))
                     .rounded_full()
                     .flex()
@@ -258,6 +255,14 @@ impl Shell {
             .child(
                 div()
                     .id("sidebar-create-button")
+                    .role(gpui::Role::Button)
+                    .aria_label("Create a bot or team")
+                    .aria_expanded(self.create_menu_open)
+                    .tab_index(0)
+                    .focus_visible({
+                        let focus = theme.focus;
+                        move |style| style.border_1().border_color(focus)
+                    })
                     .size(px(metrics::CONTROL_LG))
                     .rounded_full()
                     .flex()
@@ -293,6 +298,14 @@ impl Shell {
         let hover = theme.hover_wash();
         div()
             .id(id)
+            .role(gpui::Role::Button)
+            .aria_label(label)
+            .aria_description(detail)
+            .tab_index(0)
+            .focus_visible({
+                let focus = theme.focus;
+                move |style| style.border_1().border_color(focus)
+            })
             .h(px(metrics::MENU_ENTRY_HEIGHT))
             .px(px(metrics::SPACE_3))
             .flex()
@@ -310,7 +323,7 @@ impl Shell {
                     .overflow_hidden()
                     .flex()
                     .flex_col()
-                    .gap(px(1.0))
+                    .gap(px(metrics::PX_1))
                     .child(
                         div()
                             .w_full()
@@ -345,6 +358,9 @@ impl Shell {
         Some(
             div()
                 .id("create-menu-layer")
+                .role(gpui::Role::Menu)
+                .aria_label("Create")
+                .tab_group()
                 .absolute()
                 .top_0()
                 .left_0()
@@ -495,6 +511,13 @@ impl Shell {
     ) -> AnyElement {
         div()
             .id(id)
+            .role(gpui::Role::Button)
+            .aria_label(label)
+            .tab_index(0)
+            .focus_visible({
+                let focus = theme.focus;
+                move |style| style.border_1().border_color(focus)
+            })
             .h(px(metrics::MENU_ROW))
             .px(px(metrics::SPACE_3))
             .flex()
@@ -635,7 +658,7 @@ impl Shell {
                     .px(px(metrics::SPACE_2))
                     .flex()
                     .items_center()
-                    .gap(px(6.0))
+                    .gap(px(metrics::PX_6))
                     .rounded(px(metrics::RADIUS_CONTROL))
                     .bg(theme.inset)
                     .cursor_text()
@@ -870,7 +893,7 @@ impl Shell {
                     .overflow_hidden()
                     .flex()
                     .flex_col()
-                    .gap(px(1.0))
+                    .gap(px(metrics::PX_1))
                     .child(
                         div()
                             .truncate()
@@ -893,7 +916,7 @@ impl Shell {
                     .flex()
                     .flex_col()
                     .items_end()
-                    .gap(px(6.0))
+                    .gap(px(metrics::PX_6))
                     .child(
                         div()
                             .text_size(px(typo::TINY))
@@ -994,12 +1017,12 @@ impl Shell {
                     .flex()
                     .flex_col()
                     .justify_center()
-                    .gap(px(4.0))
+                    .gap(px(metrics::SPACE_1))
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(5.0))
+                            .gap(px(metrics::PX_5))
                             .child(
                                 div()
                                     .min_w_0()
@@ -1012,9 +1035,9 @@ impl Shell {
                             .when(!bot.role.is_empty(), |row| {
                                 row.child(
                                     div()
-                                        .max_w(px(66.0))
-                                        .px(px(6.0))
-                                        .py(px(2.0))
+                                        .max_w(px(metrics::PX_66))
+                                        .px(px(metrics::PX_6))
+                                        .py(px(metrics::PX_2))
                                         .rounded_full()
                                         .bg(theme.ink.opacity(0.07))
                                         .text_size(px(typo::TINY))

@@ -71,7 +71,6 @@ impl Shell {
                 && !bot.allowed_folders.contains(&folder)
             {
                 bot.allowed_folders.push(folder);
-                self.persist_workspace();
             }
         }
         self.resume_after_answer();
@@ -308,6 +307,7 @@ impl Shell {
                                         let deny = matches!(choice, PermissionChoice::Deny);
                                         let primary = !deny
                                             && primary_choice == Some(choice_index);
+                                        let focus = theme.focus;
                                         div()
                                             .id((
                                                 "approval-choice",
@@ -315,6 +315,12 @@ impl Shell {
                                                     + part_index * 16
                                                     + choice_index,
                                             ))
+                                            .role(gpui::Role::Button)
+                                            .aria_label(format!("Permission choice: {label}"))
+                                            .tab_index(0)
+                                            .focus_visible(move |style| {
+                                                style.border_1().border_color(focus)
+                                            })
                                             .h(px(metrics::MENU_ROW))
                                             .px(px(metrics::SPACE_3))
                                             .rounded_full()
@@ -410,6 +416,7 @@ impl Shell {
                                 this.children(options.iter().enumerate().map(
                                     |(option_index, option)| {
                                         let chosen = selected.iter().any(|s| s == option);
+                                        let focus = theme.focus;
                                         div()
                                             .id((
                                                 "question-option",
@@ -417,6 +424,17 @@ impl Shell {
                                                     + part_index * 16
                                                     + option_index,
                                             ))
+                                            .role(if *multi_select {
+                                                gpui::Role::CheckBox
+                                            } else {
+                                                gpui::Role::Button
+                                            })
+                                            .aria_label(option.clone())
+                                            .aria_selected(chosen)
+                                            .tab_index(0)
+                                            .focus_visible(move |style| {
+                                                style.border_1().border_color(focus)
+                                            })
                                             .h(px(metrics::MENU_ROW))
                                             .px(px(metrics::SPACE_3))
                                             .rounded_full()
@@ -446,6 +464,13 @@ impl Shell {
                                     this.child(
                                         div()
                                             .id(("question-send", message_index * 32 + part_index))
+                                            .role(gpui::Role::Button)
+                                            .aria_label("Send selected answers")
+                                            .tab_index(0)
+                                            .focus_visible({
+                                                let focus = theme.focus;
+                                                move |style| style.border_1().border_color(focus)
+                                            })
                                             .h(px(metrics::MENU_ROW))
                                             .px(px(metrics::SPACE_3))
                                             .rounded_full()

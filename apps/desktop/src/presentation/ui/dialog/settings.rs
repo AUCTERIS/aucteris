@@ -10,7 +10,7 @@ use crate::presentation::ui::action::UiAction;
 use crate::presentation::ui::shell::Shell;
 use crate::presentation::ui::widgets;
 
-use super::{Dialog, SettingsPage};
+use super::{Dialog, DialogShellPresentation, SettingsPage};
 
 impl Shell {
     pub(super) fn settings_dialog(
@@ -41,6 +41,14 @@ impl Shell {
             navigation.push(
                 div()
                     .id(("settings-tab", entry as usize))
+                    .role(gpui::Role::Button)
+                    .aria_label(entry.label())
+                    .aria_selected(selected)
+                    .tab_index(0)
+                    .focus_visible({
+                        let focus = theme.focus;
+                        move |style| style.border_1().border_color(focus)
+                    })
                     .w_full()
                     .px(px(metrics::SPACE_2))
                     .py(px(metrics::SPACE_2))
@@ -70,7 +78,7 @@ impl Shell {
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .gap(px(2.0))
+                            .gap(px(metrics::PX_2))
                             .child(
                                 div()
                                     .text_size(px(typo::META))
@@ -113,7 +121,7 @@ impl Shell {
             .overflow_hidden()
             .child(
                 div()
-                    .w(px(190.0))
+                    .w(px(metrics::PX_190))
                     .h_full()
                     .flex_shrink_0()
                     .p(px(metrics::SPACE_2))
@@ -172,7 +180,17 @@ impl Shell {
             )
             .into_any_element();
 
-        self.dialog_shell(theme, cx, 760.0, header, body, footer)
+        self.dialog_shell(
+            theme,
+            cx,
+            DialogShellPresentation {
+                width: 760.0,
+                label: "Settings",
+            },
+            header,
+            body,
+            footer,
+        )
     }
 
     fn settings_general(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
@@ -281,6 +299,14 @@ impl Shell {
                 .child(
                     div()
                         .id(("settings-provider-header", index))
+                        .role(gpui::Role::Button)
+                        .aria_label(format!("{} provider settings", cli.provider))
+                        .aria_expanded(self.provider_expanded.contains(&header_cli_id))
+                        .tab_index(0)
+                        .focus_visible({
+                            let focus = theme.focus;
+                            move |style| style.border_1().border_color(focus)
+                        })
                         .w_full()
                         .px(px(metrics::SPACE_3))
                         .py(px(metrics::SPACE_2))
@@ -302,7 +328,7 @@ impl Shell {
                                 .min_w_0()
                                 .flex()
                                 .flex_col()
-                                .gap(px(2.0))
+                                .gap(px(metrics::PX_2))
                                 .child(
                                     div()
                                         .flex()
@@ -350,38 +376,14 @@ impl Shell {
                             header.child(widgets::switch(
                                 ("settings-provider-enabled", index),
                                 enabled,
+                                format!("{} enabled", cli.provider),
                                 theme,
                                 cx.listener(move |this, _, _, cx| {
                                     cx.stop_propagation();
-                                    if enabled {
-                                        if enabled_count <= 1 {
-                                            return;
-                                        }
-                                        if !this.settings.disabled_runtimes.contains(&cli_id) {
-                                            this.settings.disabled_runtimes.push(cli_id.clone());
-                                        }
-                                        if crate::application::engine::Engine::runtime_base(
-                                            &this.settings.default_runtime,
-                                        ) == cli_id
-                                            && let Some(next) =
-                                                this.engine.available_runtimes().iter().find(
-                                                    |candidate| {
-                                                        candidate.id != cli_id
-                                                            && !this
-                                                                .settings
-                                                                .disabled_runtimes
-                                                                .iter()
-                                                                .any(|id| id == candidate.id)
-                                                    },
-                                                )
-                                        {
-                                            this.settings.default_runtime = next.id.to_string();
-                                        }
-                                    } else {
-                                        this.settings.disabled_runtimes.retain(|id| id != &cli_id);
-                                    }
-                                    this.persist_workspace();
-                                    cx.notify();
+                                    this.dispatch(
+                                        UiAction::ToggleRuntimeVisibility(cli_id.clone()),
+                                        cx,
+                                    );
                                 }),
                             ))
                         })
@@ -442,6 +444,14 @@ impl Shell {
                         rows.push(
                             div()
                                 .id(choice_element_id)
+                                .role(gpui::Role::Button)
+                                .aria_label(choice.label.clone())
+                                .aria_selected(selected)
+                                .tab_index(0)
+                                .focus_visible({
+                                    let focus = theme.focus;
+                                    move |style| style.border_1().border_color(focus)
+                                })
                                 .w_full()
                                 .min_w_0()
                                 .px(px(metrics::SPACE_2))
@@ -454,9 +464,10 @@ impl Shell {
                                 .cursor_pointer()
                                 .hover(move |style| style.bg(row_hover))
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.settings.default_runtime = runtime_choice.clone();
-                                    this.persist_workspace();
-                                    cx.notify();
+                                    this.dispatch(
+                                        UiAction::SetDefaultRuntime(runtime_choice.clone()),
+                                        cx,
+                                    );
                                 }))
                                 .child(widgets::icon(
                                     choice.icon,
@@ -473,7 +484,7 @@ impl Shell {
                                         .min_w_0()
                                         .flex()
                                         .flex_col()
-                                        .gap(px(1.0))
+                                        .gap(px(metrics::PX_1))
                                         .child(
                                             div()
                                                 .text_size(px(typo::META))
@@ -547,7 +558,7 @@ impl Shell {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .gap(px(2.0))
+                    .gap(px(metrics::PX_2))
                     .child(
                         div()
                             .text_size(px(typo::META))
@@ -570,6 +581,7 @@ impl Shell {
             .child(widgets::switch(
                 ("settings-send", 0),
                 self.settings.send_on_enter,
+                "Enter sends the message",
                 theme,
                 cx.listener(|this, _, _, cx| this.dispatch(UiAction::ToggleSendOnEnter, cx)),
             ));
@@ -619,7 +631,7 @@ impl Shell {
                 if combo_index > 0 {
                     combo_elements.push(
                         div()
-                            .px(px(2.0))
+                            .px(px(metrics::PX_2))
                             .text_size(px(typo::TINY))
                             .text_color(theme.ink_tertiary)
                             .child("or")
@@ -650,7 +662,7 @@ impl Shell {
             }
             elements.push(
                 div()
-                    .h(px(34.0))
+                    .h(px(metrics::PX_34))
                     .flex()
                     .items_center()
                     .justify_between()
@@ -743,7 +755,7 @@ impl Shell {
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(2.0))
+                    .gap(px(metrics::PX_2))
                     .child(
                         div()
                             .text_size(px(typo::BODY))
@@ -784,7 +796,7 @@ impl Shell {
             .child(
                 div()
                     .min_w_0()
-                    .max_w(px(320.0))
+                    .max_w(px(metrics::PX_320))
                     .text_right()
                     .text_size(px(typo::TINY))
                     .text_color(theme.ink)

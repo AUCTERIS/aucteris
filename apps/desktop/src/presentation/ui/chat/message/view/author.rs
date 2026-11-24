@@ -37,8 +37,8 @@ impl Shell {
                 );
                 let file_body = if is_image {
                     img(std::path::PathBuf::from(path.clone()))
-                        .max_w(px(320.0))
-                        .max_h(px(220.0))
+                        .max_w(px(metrics::PX_320))
+                        .max_h(px(metrics::PX_220))
                         .rounded(px(metrics::RADIUS_CONTROL))
                         .into_any_element()
                 } else {

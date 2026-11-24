@@ -155,7 +155,7 @@ pub fn chip(label: impl Into<SharedString>, theme: &Theme) -> AnyElement {
     div()
         .flex_shrink_0()
         .h(px(metrics::CONTROL_XS))
-        .px(px(8.0))
+        .px(px(metrics::SPACE_2))
         .flex()
         .items_center()
         .rounded_full()
@@ -177,10 +177,10 @@ pub fn chip_with_icon(
     div()
         .flex_shrink_0()
         .h(px(metrics::CONTROL_XS))
-        .px(px(8.0))
+        .px(px(metrics::SPACE_2))
         .flex()
         .items_center()
-        .gap(px(5.0))
+        .gap(px(metrics::PX_5))
         .rounded_full()
         .border_1()
         .border_color(theme.hairline)
@@ -195,6 +195,7 @@ pub fn chip_with_icon(
 pub fn icon_button<F>(
     id: (&'static str, usize),
     glyph: &'static str,
+    label: impl Into<SharedString>,
     theme: &Theme,
     on_click: F,
 ) -> AnyElement
@@ -205,6 +206,13 @@ where
     let color = theme.ink_secondary;
     div()
         .id(id)
+        .role(gpui::Role::Button)
+        .aria_label(label)
+        .tab_index(0)
+        .focus_visible({
+            let focus = theme.focus;
+            move |style| style.border_1().border_color(focus)
+        })
         .flex_shrink_0()
         .size(px(metrics::ICON_BUTTON))
         .flex()
@@ -231,11 +239,18 @@ where
     F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
     let hover = theme.hover_wash();
+    let label = label.into();
+    let focus = theme.focus;
     div()
         .id(id)
+        .role(gpui::Role::Button)
+        .aria_label(label.clone())
+        .aria_selected(selected)
+        .tab_index(0)
+        .focus_visible(move |style| style.border_1().border_color(focus))
         .flex_shrink_0()
         .h(px(metrics::CONTROL_XS))
-        .px(px(10.0))
+        .px(px(metrics::PX_10))
         .flex()
         .items_center()
         .rounded_full()
@@ -256,12 +271,18 @@ where
             theme.ink_secondary
         })
         .on_click(on_click)
-        .child(label.into())
+        .child(label)
         .into_any_element()
 }
 
 /// A two-state switch. The track carries the state; nothing animates.
-pub fn switch<F>(id: (&'static str, usize), on: bool, theme: &Theme, on_click: F) -> AnyElement
+pub fn switch<F>(
+    id: (&'static str, usize),
+    on: bool,
+    label: impl Into<SharedString>,
+    theme: &Theme,
+    on_click: F,
+) -> AnyElement
 where
     F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
@@ -275,12 +296,22 @@ where
     } else {
         theme.ink_secondary
     };
+    let focus = theme.focus;
     div()
         .id(id)
+        .role(gpui::Role::CheckBox)
+        .aria_label(label)
+        .aria_toggled(if on {
+            gpui::Toggled::True
+        } else {
+            gpui::Toggled::False
+        })
+        .tab_index(0)
+        .focus_visible(move |style| style.border_1().border_color(focus))
         .flex_shrink_0()
         .w(px(metrics::SWITCH_WIDTH))
         .h(px(metrics::SWITCH_HEIGHT))
-        .p(px(2.0))
+        .p(px(metrics::PX_2))
         .flex()
         .items_center()
         .when(on, |this| this.justify_end())
@@ -288,7 +319,7 @@ where
         .bg(track)
         .cursor_pointer()
         .on_click(on_click)
-        .child(div().size(px(16.0)).rounded_full().bg(knob))
+        .child(div().size(px(metrics::SPACE_4)).rounded_full().bg(knob))
         .into_any_element()
 }
 
@@ -296,11 +327,11 @@ where
 pub fn keycap(label: impl Into<SharedString>, theme: &Theme) -> AnyElement {
     div()
         .flex_shrink_0()
-        .h(px(20.0))
-        .px(px(6.0))
+        .h(px(metrics::CONTROL_MD))
+        .px(px(metrics::PX_6))
         .flex()
         .items_center()
-        .rounded(px(5.0))
+        .rounded(px(metrics::PX_5))
         .bg(theme.ink.opacity(0.05))
         .border_1()
         .border_color(theme.hairline)
@@ -324,7 +355,7 @@ pub fn section_label(label: impl Into<SharedString>, theme: &Theme) -> AnyElemen
 /// A 1px vertical rule between panes.
 pub fn edge(color: Hsla) -> AnyElement {
     div()
-        .w(px(1.0))
+        .w(px(metrics::PX_1))
         .h_full()
         .flex_shrink_0()
         .bg(color)
@@ -336,13 +367,13 @@ pub fn meter(fraction: f32, theme: &Theme) -> AnyElement {
     let fraction = fraction.clamp(0.0, 1.0);
     let track = theme.ink.opacity(if theme.is_dark() { 0.08 } else { 0.07 });
     div()
-        .h(px(4.0))
+        .h(px(metrics::SPACE_1))
         .w_full()
         .rounded_full()
         .bg(track)
         .child(
             div()
-                .h(px(4.0))
+                .h(px(metrics::SPACE_1))
                 .rounded_full()
                 .bg(theme.ink_secondary.opacity(0.85))
                 .w(gpui::relative(fraction)),

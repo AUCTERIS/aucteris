@@ -134,14 +134,14 @@ impl Shell {
 
         // 1. Search Bar at top
         let search_bar = div()
-            .h(px(38.0))
-            .px(px(10.0))
+            .h(px(metrics::PX_38))
+            .px(px(metrics::PX_10))
             .flex_shrink_0()
             .border_b_1()
             .border_color(theme.hairline)
             .flex()
             .items_center()
-            .gap(px(8.0))
+            .gap(px(metrics::SPACE_2))
             .child(widgets::icon("search", 13.0, theme.ink_tertiary))
             .child(
                 div()
@@ -163,7 +163,7 @@ impl Shell {
                 this.child(
                     div()
                         .id("provider-search-clear")
-                        .p(px(2.0))
+                        .p(px(metrics::PX_2))
                         .cursor_pointer()
                         .on_click(cx.listener(move |this, _event, _window, cx| {
                             if let Some(picker) = this.picker_mut(host) {
@@ -180,12 +180,12 @@ impl Shell {
         // provider appears without touching this view.
         let all_selected = current_rail.is_none();
         let mut rail_col = div()
-            .w(px(42.0))
+            .w(px(metrics::PX_42))
             .flex_shrink_0()
-            .p(px(4.0))
+            .p(px(metrics::SPACE_1))
             .flex()
             .flex_col()
-            .gap(px(4.0))
+            .gap(px(metrics::SPACE_1))
             .border_r_1()
             .border_color(theme.hairline)
             // Star / All tab
@@ -193,9 +193,9 @@ impl Shell {
                 div()
                     .id("provider-rail-all")
                     .relative()
-                    .w(px(34.0))
-                    .h(px(34.0))
-                    .rounded(px(6.0))
+                    .w(px(metrics::PX_34))
+                    .h(px(metrics::PX_34))
+                    .rounded(px(metrics::PX_6))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -222,15 +222,21 @@ impl Shell {
                             div()
                                 .absolute()
                                 .right(px(-4.0))
-                                .w(px(3.0))
-                                .h(px(18.0))
+                                .w(px(metrics::PX_3))
+                                .h(px(metrics::PX_18))
                                 .rounded_full()
                                 .bg(purple),
                         )
                     }),
             )
             // Divider
-            .child(div().h(px(1.0)).mx(px(-4.0)).my(px(2.0)).bg(theme.hairline));
+            .child(
+                div()
+                    .h(px(metrics::PX_1))
+                    .mx(px(-4.0))
+                    .my(px(metrics::PX_2))
+                    .bg(theme.hairline),
+            );
 
         // Unique providers in catalog order, each with its brand icon.
         let mut providers: Vec<(&'static str, &'static str)> = Vec::new();
@@ -251,9 +257,9 @@ impl Shell {
                 div()
                     .id(("provider-rail-brand", ix))
                     .relative()
-                    .w(px(34.0))
-                    .h(px(34.0))
-                    .rounded(px(6.0))
+                    .w(px(metrics::PX_34))
+                    .h(px(metrics::PX_34))
+                    .rounded(px(metrics::PX_6))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -280,8 +286,8 @@ impl Shell {
                             div()
                                 .absolute()
                                 .right(px(-4.0))
-                                .w(px(3.0))
-                                .h(px(18.0))
+                                .w(px(metrics::PX_3))
+                                .h(px(metrics::PX_18))
                                 .rounded_full()
                                 .bg(purple),
                         )
@@ -309,13 +315,13 @@ impl Shell {
             filtered_items.push(
                 div()
                     .id(item_id)
-                    .px(px(8.0))
-                    .py(px(6.0))
-                    .rounded(px(6.0))
+                    .px(px(metrics::SPACE_2))
+                    .py(px(metrics::PX_6))
+                    .rounded(px(metrics::PX_6))
                     .flex()
                     .items_center()
                     .justify_between()
-                    .gap(px(8.0))
+                    .gap(px(metrics::SPACE_2))
                     .cursor_pointer()
                     .bg(if is_selected {
                         theme.raised_hover
@@ -342,7 +348,7 @@ impl Shell {
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(10.0))
+                            .gap(px(metrics::PX_10))
                             .min_w_0()
                             .flex_1()
                             .child(widgets::icon(choice.icon, 18.0, theme.ink))
@@ -350,12 +356,12 @@ impl Shell {
                                 div()
                                     .flex()
                                     .flex_col()
-                                    .gap(px(1.0))
+                                    .gap(px(metrics::PX_1))
                                     .min_w_0()
                                     .child(
                                         div()
                                             .truncate()
-                                            .text_size(px(12.5))
+                                            .text_size(px(metrics::PX_12_5))
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(theme.ink)
                                             .child(choice.label.clone()),
@@ -363,7 +369,7 @@ impl Shell {
                                     .child(
                                         div()
                                             .truncate()
-                                            .text_size(px(10.5))
+                                            .text_size(px(metrics::PX_10_5))
                                             .text_color(theme.ink_tertiary)
                                             .child(choice.detail.clone()),
                                     ),
@@ -373,12 +379,12 @@ impl Shell {
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(6.0))
+                            .gap(px(metrics::PX_6))
                             .when_some(choice.badge.clone(), |this, badge| {
                                 this.child(
                                     div()
-                                        .px(px(6.0))
-                                        .py(px(1.5))
+                                        .px(px(metrics::PX_6))
+                                        .py(px(metrics::PX_1_5))
                                         .rounded_full()
                                         .bg(theme.inset)
                                         .text_size(px(typo::TINY))
@@ -395,9 +401,9 @@ impl Shell {
         }
 
         let section_header = div()
-            .px(px(8.0))
-            .pt(px(6.0))
-            .pb(px(2.0))
+            .px(px(metrics::SPACE_2))
+            .pt(px(metrics::PX_6))
+            .pb(px(metrics::PX_2))
             .text_size(px(typo::TINY))
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(theme.ink_tertiary)
@@ -412,15 +418,15 @@ impl Shell {
             .min_w_0()
             .overflow_y_scroll()
             .track_scroll(&picker.scroll)
-            .p(px(4.0))
+            .p(px(metrics::SPACE_1))
             .flex()
             .flex_col()
-            .gap(px(2.0))
+            .gap(px(metrics::PX_2))
             .child(section_header)
             .when(filtered_items.is_empty(), |this| {
                 this.child(
                     div()
-                        .p(px(12.0))
+                        .p(px(metrics::SPACE_3))
                         .text_size(px(typo::META))
                         .text_color(theme.ink_tertiary)
                         .child("No matching providers or models found"),
@@ -442,7 +448,7 @@ impl Shell {
                         window.focus(&this.panel_picker_focus.clone(), cx);
                     }))
             })
-            .h(px(250.0))
+            .h(px(metrics::PX_250))
             .rounded(px(metrics::RADIUS_CONTROL))
             .bg(theme.panel)
             .border_1()

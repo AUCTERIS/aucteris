@@ -36,8 +36,8 @@ impl Shell {
         // GPUI rebuild or flicker the draft glyphs themselves.
         let input = div()
             .w_full()
-            .min_w(px(0.0))
-            .min_h(px(32.0))
+            .min_w(px(metrics::ZERO))
+            .min_h(px(metrics::PX_32))
             .flex()
             .items_start()
             .overflow_hidden()
@@ -45,12 +45,12 @@ impl Shell {
             .text_size(px(typo::BUBBLE))
             .line_height(px(typo::BUBBLE_LINE))
             .text_color(if empty { theme.ink_tertiary } else { theme.ink })
-            .child(div().min_w(px(0.0)).child(shown))
+            .child(div().min_w(px(metrics::ZERO)).child(shown))
             .when(focused && self.caret_visible, |this| {
                 this.child(
                     div()
-                        .w(px(1.0))
-                        .h(px(18.0))
+                        .w(px(metrics::PX_1))
+                        .h(px(metrics::PX_18))
                         .flex_shrink_0()
                         .bg(theme.ink_secondary),
                 )
@@ -148,7 +148,7 @@ impl Shell {
                     .child(widgets::icon("file", metrics::ICON_SM, theme.ink_tertiary))
                     .child(
                         div()
-                            .max_w(px(160.0))
+                            .max_w(px(metrics::PX_160))
                             .truncate()
                             .text_size(px(typo::TINY))
                             .text_color(theme.ink_secondary)

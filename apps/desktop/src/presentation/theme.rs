@@ -149,7 +149,7 @@ impl Theme {
             scrim: hsla(0.0, 0.0, 0.0, 0.62),
             ink,
             ink_secondary: hsla(0.09, 0.03, 0.65, 1.0),
-            ink_tertiary: hsla(0.09, 0.03, 0.475, 1.0),
+            ink_tertiary: hsla(0.09, 0.03, 0.54, 1.0),
             hairline: hsla(0.0, 0.0, 1.0, 0.10),
             edge: hsla(0.0, 0.0, 1.0, 0.15),
             accent: ink,
@@ -157,7 +157,7 @@ impl Theme {
             on_accent: hsla(0.0, 0.0, 0.075, 1.0),
             // Focus is ink, not a hue: the accent stays reserved for links and
             // the selected state, and a neutral ring reads calm on every skin.
-            focus: hsla(0.0, 0.0, 1.0, 0.32),
+            focus: hsla(0.0, 0.0, 1.0, 0.50),
             success: hsla(0.42, 0.55, 0.55, 1.0),
             warning: hsla(0.11, 0.85, 0.62, 1.0),
             danger: hsla(0.02, 0.72, 0.62, 1.0),
@@ -189,13 +189,13 @@ impl Theme {
             scrim: hsla(0.0, 0.0, 0.0, 0.30),
             ink,
             ink_secondary: hsla(0.09, 0.04, 0.36, 1.0),
-            ink_tertiary: hsla(0.09, 0.03, 0.545, 1.0),
+            ink_tertiary: hsla(0.09, 0.03, 0.44, 1.0),
             hairline: hsla(0.0, 0.0, 0.0, 0.10),
             edge: hsla(0.0, 0.0, 0.0, 0.145),
             accent: ink,
             accent_text: ink,
             on_accent: hsla(0.0, 0.0, 0.99, 1.0),
-            focus: hsla(0.0, 0.0, 0.0, 0.24),
+            focus: hsla(0.0, 0.0, 0.0, 0.50),
             success: hsla(0.42, 0.62, 0.36, 1.0),
             warning: hsla(0.10, 0.78, 0.40, 1.0),
             danger: hsla(0.01, 0.70, 0.47, 1.0),
@@ -244,6 +244,80 @@ impl Theme {
     }
 }
 
+#[cfg(test)]
+mod contrast_tests {
+    use super::Theme;
+    use gpui::{Hsla, Rgba};
+
+    fn luminance(color: Hsla) -> f32 {
+        let rgb = color.to_rgb();
+        let linear = |channel: f32| {
+            if channel <= 0.04045 {
+                channel / 12.92
+            } else {
+                ((channel + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(rgb.r) + 0.7152 * linear(rgb.g) + 0.0722 * linear(rgb.b)
+    }
+
+    fn contrast(foreground: Hsla, background: Hsla) -> f32 {
+        let (lighter, darker) = {
+            let foreground = luminance(foreground);
+            let background = luminance(background);
+            if foreground >= background {
+                (foreground, background)
+            } else {
+                (background, foreground)
+            }
+        };
+        (lighter + 0.05) / (darker + 0.05)
+    }
+
+    fn blend(foreground: Hsla, background: Hsla) -> Hsla {
+        let foreground = foreground.to_rgb();
+        let background = background.to_rgb();
+        let alpha = foreground.a;
+        Hsla::from(Rgba {
+            r: foreground.r * alpha + background.r * (1.0 - alpha),
+            g: foreground.g * alpha + background.g * (1.0 - alpha),
+            b: foreground.b * alpha + background.b * (1.0 - alpha),
+            a: 1.0,
+        })
+    }
+
+    #[test]
+    fn body_and_secondary_text_meet_wcag_aa_on_their_surfaces() {
+        for theme in [Theme::dark(), Theme::light()] {
+            for surface in [theme.bg, theme.panel, theme.card, theme.composer] {
+                assert!(
+                    contrast(theme.ink, surface) >= 4.5,
+                    "primary text contrast: {:?}",
+                    theme.appearance
+                );
+                assert!(
+                    contrast(blend(theme.focus, surface), surface) >= 3.0,
+                    "focus indicator contrast {:?}: {}",
+                    theme.appearance,
+                    contrast(blend(theme.focus, surface), surface)
+                );
+                assert!(
+                    contrast(theme.ink_secondary, surface) >= 4.5,
+                    "secondary text contrast: {:?}",
+                    theme.appearance
+                );
+                assert!(
+                    contrast(theme.ink_tertiary, surface) >= 4.5,
+                    "tertiary text contrast {:?}: {}",
+                    theme.appearance,
+                    contrast(theme.ink_tertiary, surface)
+                );
+            }
+            assert!(contrast(theme.on_user_plate, theme.user_plate) >= 4.5);
+        }
+    }
+}
+
 fn identity_palette(dark: bool) -> [Hsla; 8] {
     // Aucteris agent identity palette: warm red, orange and yellow alongside
     // green, cyan, blue, violet and magenta. Keep colors stable across skins.
@@ -263,8 +337,43 @@ fn identity_palette(dark: bool) -> [Hsla; 8] {
 /// Layout numbers. Spacing is a 4px grid (with a 2px half-step for hairlines),
 /// control heights are 20/24/28/30/32.
 pub mod metrics {
+    /// Low-level pixel scale for one-off layout details. Prefer semantic
+    /// tokens below when a control or spacing role is known.
+    pub const ZERO: f32 = 0.0;
+    pub const PX_1: f32 = 1.0;
+    pub const PX_1_5: f32 = 1.5;
+    pub const PX_2: f32 = 2.0;
+    pub const PX_3: f32 = 3.0;
+    pub const PX_5: f32 = 5.0;
+    pub const PX_6: f32 = 6.0;
+    pub const PX_9: f32 = 9.0;
+    pub const PX_10: f32 = 10.0;
+    pub const PX_10_5: f32 = 10.5;
+    pub const PX_12_5: f32 = 12.5;
+    pub const PX_18: f32 = 18.0;
+    pub const PX_19: f32 = 19.0;
+    pub const PX_23: f32 = 23.0;
+    pub const PX_26: f32 = 26.0;
+    pub const PX_32: f32 = 32.0;
+    pub const PX_34: f32 = 34.0;
+    pub const PX_36: f32 = 36.0;
+    pub const PX_38: f32 = 38.0;
+    pub const PX_40: f32 = 40.0;
+    pub const PX_42: f32 = 42.0;
+    pub const PX_56: f32 = 56.0;
+    pub const PX_66: f32 = 66.0;
+    pub const PX_111: f32 = 111.0;
+    pub const PX_130: f32 = 130.0;
+    pub const PX_160: f32 = 160.0;
+    pub const PX_190: f32 = 190.0;
+    pub const PX_220: f32 = 220.0;
+    pub const PX_250: f32 = 250.0;
+    pub const PX_320: f32 = 320.0;
+    pub const PX_360: f32 = 360.0;
+
     pub const SIDEBAR_WIDTH: f32 = 256.0;
     pub const PANEL_WIDTH: f32 = 332.0;
+    pub const PANEL_COLLAPSE_WIDTH: f32 = 1_100.0;
     /// Shared centered width for the transcript, status line, and composer.
     pub const CHAT_COLUMN_WIDTH: f32 = 900.0;
     pub const HEADER_HEIGHT: f32 = 44.0;

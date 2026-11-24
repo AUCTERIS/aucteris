@@ -9,7 +9,7 @@ use crate::presentation::theme::{Theme, metrics, text as typo};
 use crate::presentation::ui::shell::Shell;
 use crate::presentation::ui::widgets;
 
-use super::{Dialog, TeamForm, caret_spans};
+use super::{Dialog, DialogShellPresentation, TeamForm, caret_spans};
 
 impl Shell {
     /// The team form: a title field with the same caret as the bot form,
@@ -47,11 +47,18 @@ impl Shell {
             }));
         let title_control = div()
             .id("team-title-field")
+            .role(gpui::Role::TextInput)
+            .aria_label("Team name")
+            .tab_index(0)
+            .focus_visible({
+                let focus = theme.focus;
+                move |style| style.border_1().border_color(focus)
+            })
             .h(px(metrics::CONTROL_LG))
-            .px(px(10.0))
+            .px(px(metrics::PX_10))
             .flex()
             .items_center()
-            .gap(px(2.0))
+            .gap(px(metrics::PX_2))
             .overflow_hidden()
             .rounded(px(metrics::RADIUS_CONTROL))
             .bg(theme.inset)
@@ -73,7 +80,7 @@ impl Shell {
                     .truncate()
                     .font_family(theme.font_sans.clone())
                     .text_size(px(typo::BODY))
-                    .line_height(px(19.0))
+                    .line_height(px(metrics::PX_19))
                     .text_color(if empty { theme.ink_tertiary } else { theme.ink })
                     .child(content),
             )
@@ -84,10 +91,17 @@ impl Shell {
             let bot_id = bot.id;
             let selected = form.members.contains(&bot_id);
             let hover = theme.hover_wash();
+            let focus = theme.focus;
+            let tab_index = bot_rows.len() as isize + 1;
             bot_rows.push(
                 div()
                     .id(("team-bot", bot_id as usize))
-                    .h(px(40.0))
+                    .role(gpui::Role::CheckBox)
+                    .aria_label(bot.name.to_string())
+                    .aria_selected(selected)
+                    .tab_index(tab_index)
+                    .focus_visible(move |style| style.border_1().border_color(focus))
+                    .h(px(metrics::PX_40))
                     .px(px(metrics::SPACE_2))
                     .flex()
                     .items_center()
@@ -119,7 +133,7 @@ impl Shell {
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .gap(px(1.0))
+                            .gap(px(metrics::PX_1))
                             .child(
                                 div()
                                     .truncate()
@@ -155,7 +169,7 @@ impl Shell {
             div()
                 .flex()
                 .flex_col()
-                .gap(px(2.0))
+                .gap(px(metrics::PX_2))
                 .children(bot_rows)
                 .into_any_element()
         };
@@ -213,8 +227,8 @@ impl Shell {
             .child(
                 div()
                     .id("team-create")
-                    .h(px(26.0))
-                    .px(px(12.0))
+                    .h(px(metrics::PX_26))
+                    .px(px(metrics::SPACE_3))
                     .flex()
                     .items_center()
                     .rounded_full()
@@ -239,6 +253,20 @@ impl Shell {
             )
             .into_any_element();
 
-        self.dialog_shell(theme, cx, 440.0, header, body, footer)
+        self.dialog_shell(
+            theme,
+            cx,
+            DialogShellPresentation {
+                width: 440.0,
+                label: if form.target.is_some() {
+                    "Edit team"
+                } else {
+                    "Create team"
+                },
+            },
+            header,
+            body,
+            footer,
+        )
     }
 }

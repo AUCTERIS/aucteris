@@ -88,7 +88,7 @@ impl Shell {
                     .mt(px(metrics::SPACE_HALF))
                     .w(px(metrics::CARET_WIDTH))
                     .h(px(typo::BUBBLE))
-                    .rounded(px(2.0))
+                    .rounded(px(metrics::PX_2))
                     .bg(theme.ink_secondary.opacity(0.55))
                     .into_any_element(),
             );

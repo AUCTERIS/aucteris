@@ -4,8 +4,10 @@
 use gpui::{Context, PathPromptOptions, Window};
 use std::path::{Path, PathBuf};
 
-use crate::domain::model::{self, AppearancePreference, Part};
+use crate::domain::model::{self, AppearancePreference, Bot, Chat, Part, Presence};
 use crate::presentation::theme::Theme;
+use crate::presentation::ui::dialog::BotFormSubmission;
+use aucteris_harness::komet_proto::SandboxLevel;
 
 use super::Shell;
 
@@ -56,36 +58,17 @@ impl Shell {
                     if bot.allowed_folders.iter().any(|root| root == &value) {
                         return;
                     }
-                    bot.allowed_folders.push(value);
-                    this.persist_workspace();
-                    cx.notify();
+                    this.dispatch(
+                        crate::presentation::ui::action::UiAction::AddAllowedFolder {
+                            bot: bot_id,
+                            path: value,
+                        },
+                        cx,
+                    );
                 });
             }
         })
         .detach();
-    }
-
-    pub(crate) fn remove_allowed_folder(
-        &mut self,
-        bot_id: u32,
-        index: usize,
-        cx: &mut Context<Self>,
-    ) {
-        if self.run_bot == Some(bot_id) {
-            self.stop_run(cx);
-        }
-        let removed = if let Some(bot) = self.workspace.bot_mut(bot_id)
-            && index < bot.allowed_folders.len()
-        {
-            bot.allowed_folders.remove(index);
-            true
-        } else {
-            false
-        };
-        if removed {
-            self.persist_workspace();
-        }
-        cx.notify();
     }
 
     pub(crate) fn pick_attachments(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -197,8 +180,109 @@ impl Shell {
         cx.notify();
     }
 
-    /// Register a finished team: title and members chosen in the dialog.
-    pub(crate) fn create_team(&mut self, title: String, members: Vec<u32>, cx: &mut Context<Self>) {
+    pub(crate) fn save_bot(&mut self, form: BotFormSubmission, cx: &mut Context<Self>) {
+        if let Some(id) = form.target {
+            if let Some(bot) = self.workspace.bot_mut(id) {
+                bot.name = form.name.clone().into();
+                bot.role = form.role.into();
+                bot.runtime = form.runtime.into();
+                bot.instructions = form.instructions.into();
+                bot.color = form.color;
+                bot.mascot = form.mascot;
+            }
+            if let Some(chat) = self
+                .workspace
+                .chats
+                .iter_mut()
+                .find(|chat| chat.bot == Some(id))
+            {
+                chat.title = form.name.into();
+            }
+            cx.notify();
+            return;
+        }
+
+        let id = self
+            .workspace
+            .bots
+            .iter()
+            .map(|bot| bot.id)
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let chat_id = self
+            .workspace
+            .chats
+            .iter()
+            .map(|chat| chat.id)
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let folder = crate::infrastructure::storage::AppStorage::bot_workspace_path(
+            &crate::infrastructure::storage::AppStorage::data_dir(),
+            id,
+        );
+        self.workspace.bots.push(Bot {
+            id,
+            pinned: false,
+            name: form.name.clone().into(),
+            role: form.role.into(),
+            color: form.color,
+            mascot: form.mascot,
+            runtime: form.runtime.into(),
+            presence: Presence::Resting,
+            activity: "Ready".into(),
+            folder: folder.to_string_lossy().to_string().into(),
+            allowed_folders: Vec::new(),
+            instructions: form.instructions.into(),
+            tokens: 0,
+            context_limit: None,
+            sandbox: SandboxLevel::WorkspaceWrite,
+        });
+        self.workspace.chats.push(Chat {
+            id: chat_id,
+            pinned: false,
+            title: form.name.into(),
+            bot: Some(id),
+            members: Vec::new(),
+            messages: Vec::new(),
+            preview: "Ready for your first task".into(),
+            time: model::timestamp_now(),
+            session_id: None,
+        });
+        self.stash_draft();
+        self.workspace.selected = self.workspace.chats.len() - 1;
+        self.restore_draft();
+        self.scroll.scroll_to_bottom();
+        cx.notify();
+    }
+
+    /// Create or update the team described by the dialog.
+    pub(crate) fn save_team(
+        &mut self,
+        target: Option<u32>,
+        title: String,
+        members: Vec<u32>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(team_id) = target {
+            if let Some(team) = self
+                .workspace
+                .chats
+                .iter_mut()
+                .find(|chat| chat.id == team_id)
+            {
+                team.title = title.into();
+                team.members = members;
+                team.preview = if team.members.is_empty() {
+                    "Add bots to start this team".into()
+                } else {
+                    format!("{} bots in this team", team.members.len()).into()
+                };
+            }
+            cx.notify();
+            return;
+        }
         let id = self
             .workspace
             .chats
@@ -242,7 +326,6 @@ impl Shell {
         if !room.members.contains(&bot_id) {
             room.members.push(bot_id);
             room.preview = format!("{} bots in this team", room.members.len()).into();
-            self.persist_workspace();
             cx.notify();
         }
     }
