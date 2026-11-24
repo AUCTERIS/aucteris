@@ -213,3 +213,30 @@ sur les boutons icône, piège de focus des dialogues, saisie riche/IME du
 composer, persistance de l'apparence et de `send_on_enter`, règle de repli du
 panneau droit en fenêtre étroite, validation du formulaire bot champ par champ,
 et la passe visuelle dark/light de la grille de scénarios.
+
+## 7. Lot 2 — navigation, onboarding et transcript (2026-11-24)
+
+La direction graphique reste celle de l'interface actuelle. Ce lot n'introduit pas
+de nouvelle DA ni d'animation au survol.
+
+- **État vide guidé** : sans CLI détecté, l'action ouvre directement Providers ; avec
+  un CLI installé, elle ouvre la création du premier bot ; avec des bots existants,
+  elle propose une nouvelle conversation. Les trois branches ont des tests unitaires.
+- **Navigation clavier de la sidebar** : les conversations sont exposées comme
+  boutons nommés à AccessKit, ont un focus visible, et répondent à Tab, Entrée/Espace
+  et aux flèches haut/bas.
+- **Réglage Enter** : son changement passe par `UiAction` et la persistance centralisée.
+- **Transcript** : l'ancien module de 1 822 lignes est réparti en modules de vue,
+  Markdown, code et activité ; aucun fichier issu de ce découpage ne dépasse 600 lignes.
+- **Saisie** : le `text_input.rs` orphelin n'a pas été intégré. Son implémentation
+  n'est pas compatible avec l'API GPUI épinglée (handler IME, méthodes de remplacement,
+  rendu `Element` et tokens de thème manquants). Le composer reste donc sur son
+  implémentation existante ; la couverture IME/sélection reste ouverte.
+
+**Critères encore ouverts avant de déclarer la phase complète** : centralisation de
+toutes les mutations UI (réglages provider, panneaux/dialogues), composants de saisie
+réutilisables, focus des menus/cartes/dialogues, seuil de repli du panneau en fenêtre
+étroite, validation de formulaire, tokenisation des valeurs locales restantes,
+contrastes AA et vérification manuelle des parcours en dark/light. Les cases de la
+grille de vérification restent volontairement vides tant que les écrans réels n'ont
+pas été rejoués.

@@ -9,13 +9,51 @@ mod message;
 mod table;
 
 use gpui::{
-    AnyElement, Context, FontWeight, IntoElement, ParentElement, Styled, Window, div, prelude::*,
-    px,
+    AnyElement, Context, FontWeight, IntoElement, KeyDownEvent, ParentElement, Styled, Window, div,
+    prelude::*, px,
 };
 
 use crate::presentation::theme::{Theme, metrics, text as typo};
+use crate::presentation::ui::dialog::SettingsPage;
 use crate::presentation::ui::shell::Shell;
 use crate::presentation::ui::widgets;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmptyStateAction {
+    CreateBot,
+    OpenProviders,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EmptyStateContent {
+    title: &'static str,
+    body: &'static str,
+    action_label: &'static str,
+    action: EmptyStateAction,
+}
+
+fn empty_state_content(has_cli: bool, has_bots: bool) -> EmptyStateContent {
+    match (has_cli, has_bots) {
+        (false, _) => EmptyStateContent {
+            title: "Connect an agent CLI",
+            body: "Aucteris runs local agent CLIs. Open Providers to see what is available, install one, then return here to create your first bot.",
+            action_label: "Choose a provider",
+            action: EmptyStateAction::OpenProviders,
+        },
+        (true, false) => EmptyStateContent {
+            title: "Create your first bot",
+            body: "1. Give it a name. 2. Choose an installed CLI. 3. Send it a task in your working folder.",
+            action_label: "Create your first bot",
+            action: EmptyStateAction::CreateBot,
+        },
+        (true, true) => EmptyStateContent {
+            title: "Start a conversation",
+            body: "Choose a bot in the sidebar, or create another bot to start a new conversation.",
+            action_label: "Create a bot",
+            action: EmptyStateAction::CreateBot,
+        },
+    }
+}
 
 impl Shell {
     pub(crate) fn view_chat(
@@ -26,11 +64,7 @@ impl Shell {
     ) -> AnyElement {
         if self.workspace.chats.is_empty() {
             let has_cli = !self.available_runtimes.is_empty();
-            let body = if has_cli {
-                "Create a bot, choose an installed agent CLI, and send it a task in your working folder."
-            } else {
-                "Install Claude Code, Codex CLI, OpenCode, or Gemini CLI and make it available on PATH to start."
-            };
+            let content = empty_state_content(has_cli, !self.workspace.bots.is_empty());
             return div()
                 .size_full()
                 .flex()
@@ -45,7 +79,7 @@ impl Shell {
                         .text_size(px(typo::SHEET_TITLE))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme.ink)
-                        .child("Your agent workspace is ready"),
+                        .child(content.title),
                 )
                 .child(
                     div()
@@ -53,29 +87,44 @@ impl Shell {
                         .text_center()
                         .text_size(px(typo::BODY))
                         .text_color(theme.ink_secondary)
-                        .child(body),
+                        .child(content.body),
                 )
-                .when(has_cli, |this| {
-                    this.child(
-                        div()
-                            .id("empty-create-bot")
-                            .mt(px(metrics::SPACE_2))
-                            .px(px(metrics::SPACE_4))
-                            .h(px(metrics::CONTROL_LG))
-                            .flex()
-                            .items_center()
-                            .rounded_full()
-                            .bg(theme.accent)
-                            .text_color(theme.on_accent)
-                            .cursor_pointer()
-                            .on_click(
-                                cx.listener(|this, _event, window, cx| {
-                                    this.open_new_bot(window, cx)
-                                }),
-                            )
-                            .child("Create your first bot"),
-                    )
-                })
+                .child(
+                    div()
+                        .id("empty-primary-action")
+                        .mt(px(metrics::SPACE_2))
+                        .px(px(metrics::SPACE_4))
+                        .h(px(metrics::CONTROL_LG))
+                        .flex()
+                        .items_center()
+                        .rounded_full()
+                        .bg(theme.accent)
+                        .text_color(theme.on_accent)
+                        .cursor_pointer()
+                        .tab_index(0)
+                        .role(gpui::Role::Button)
+                        .aria_label(content.action_label)
+                        .focus_visible(|style| style.border_1().border_color(theme.focus))
+                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                match content.action {
+                                    EmptyStateAction::CreateBot => this.open_new_bot(window, cx),
+                                    EmptyStateAction::OpenProviders => {
+                                        this.open_settings_page(SettingsPage::Providers, window, cx)
+                                    }
+                                }
+                            }
+                        }))
+                        .on_click(cx.listener(
+                            move |this, _event, window, cx| match content.action {
+                                EmptyStateAction::CreateBot => this.open_new_bot(window, cx),
+                                EmptyStateAction::OpenProviders => {
+                                    this.open_settings_page(SettingsPage::Providers, window, cx)
+                                }
+                            },
+                        ))
+                        .child(content.action_label),
+                )
                 .into_any_element();
         }
         div()
@@ -232,5 +281,36 @@ impl Shell {
                     .children(children),
             )
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EmptyStateAction, empty_state_content};
+
+    #[test]
+    fn no_detected_cli_guides_the_person_to_provider_setup() {
+        let content = empty_state_content(false, false);
+
+        assert_eq!(content.action, EmptyStateAction::OpenProviders);
+        assert_eq!(content.action_label, "Choose a provider");
+        assert!(content.body.contains("install one"));
+    }
+
+    #[test]
+    fn installed_cli_guides_a_first_time_person_to_create_a_bot() {
+        let content = empty_state_content(true, false);
+
+        assert_eq!(content.action, EmptyStateAction::CreateBot);
+        assert_eq!(content.action_label, "Create your first bot");
+        assert!(content.body.contains("working folder"));
+    }
+
+    #[test]
+    fn existing_bots_get_a_conversation_empty_state() {
+        let content = empty_state_content(true, true);
+
+        assert_eq!(content.title, "Start a conversation");
+        assert_eq!(content.action, EmptyStateAction::CreateBot);
     }
 }

@@ -68,7 +68,16 @@ impl Shell {
     }
 
     pub(crate) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.dialog = Some(Dialog::Settings(SettingsPage::General));
+        self.open_settings_page(SettingsPage::General, window, cx);
+    }
+
+    pub(crate) fn open_settings_page(
+        &mut self,
+        page: SettingsPage,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.dialog = Some(Dialog::Settings(page));
         self.caret_visible = true;
         self.create_menu_open = false;
         self.panel_picker.open = false;

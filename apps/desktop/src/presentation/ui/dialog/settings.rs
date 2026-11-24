@@ -571,11 +571,7 @@ impl Shell {
                 ("settings-send", 0),
                 self.settings.send_on_enter,
                 theme,
-                cx.listener(|this, _, _, cx| {
-                    this.settings.send_on_enter = !this.settings.send_on_enter;
-                    this.persist_workspace();
-                    cx.notify();
-                }),
+                cx.listener(|this, _, _, cx| this.dispatch(UiAction::ToggleSendOnEnter, cx)),
             ));
 
         div()

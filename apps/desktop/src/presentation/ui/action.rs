@@ -61,6 +61,7 @@ pub enum UiAction {
         part: usize,
     },
     SetMode(Mode),
+    ToggleSendOnEnter,
     CreateTeam {
         title: String,
         members: Vec<u32>,
@@ -133,6 +134,10 @@ impl Shell {
                 part,
             } => self.answer_question_multi(chat, message, part, cx),
             UiAction::SetMode(mode) => self.set_mode(mode, cx),
+            UiAction::ToggleSendOnEnter => {
+                self.settings.send_on_enter = !self.settings.send_on_enter;
+                cx.notify();
+            }
             UiAction::CreateTeam { title, members } => self.create_team(title, members, cx),
             UiAction::AddBotToRoom { room, bot } => self.add_bot_to_room(room, bot, cx),
             UiAction::RemoveBotFromRoom { room, bot } => self.remove_bot_from_room(room, bot, cx),

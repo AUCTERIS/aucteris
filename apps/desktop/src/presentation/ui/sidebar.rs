@@ -13,6 +13,23 @@ use crate::presentation::theme::{Theme, metrics, text as typo};
 use crate::presentation::ui::shell::{ContextTarget, Shell};
 use crate::presentation::ui::widgets;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SidebarDirection {
+    Previous,
+    Next,
+}
+
+fn sidebar_navigation_direction(key: &str, modified: bool) -> Option<SidebarDirection> {
+    if modified {
+        return None;
+    }
+    match key {
+        "up" => Some(SidebarDirection::Previous),
+        "down" => Some(SidebarDirection::Next),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ContextAction {
     Pin,
@@ -510,6 +527,7 @@ impl Shell {
 
     fn sidebar_home(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let mut bot_rows = Vec::new();
+        let mut tab_order = 0;
         let mut bots = self.workspace.bots.iter().collect::<Vec<_>>();
         bots.sort_by_key(|bot| !bot.pinned);
         for bot in bots {
@@ -531,7 +549,9 @@ impl Shell {
                 bot,
                 self.workspace.chats[index].time.to_string(),
                 mascot,
+                tab_order,
             ));
+            tab_order += 1;
         }
 
         let mut room_indices: Vec<usize> = self
@@ -560,7 +580,9 @@ impl Shell {
                 mark,
                 None,
                 chat.time.to_string(),
+                tab_order,
             ));
+            tab_order += 1;
         }
 
         let room_heading = div()
@@ -571,6 +593,7 @@ impl Shell {
 
         div()
             .id("sidebar-home")
+            .tab_group()
             .flex_1()
             .flex()
             .flex_col()
@@ -655,6 +678,7 @@ impl Shell {
         let matches = |title: &str| query.is_empty() || title.to_lowercase().contains(&query);
 
         let mut rows: Vec<AnyElement> = Vec::new();
+        let mut tab_order = 0;
 
         rows.push(
             div()
@@ -690,7 +714,9 @@ impl Shell {
                 bot,
                 self.workspace.chats[index].time.to_string(),
                 mascot,
+                tab_order,
             ));
+            tab_order += 1;
         }
 
         let mut room_indices: Vec<usize> = self
@@ -720,9 +746,10 @@ impl Shell {
                 let preview = chat.preview.to_string();
                 let time = chat.time.to_string();
                 let mark = self.room_mascot_mark(chat, theme, metrics::MASCOT_ROW);
-                rows.push(
-                    self.sidebar_row(theme, cx, index, selected, title, preview, mark, None, time),
-                );
+                rows.push(self.sidebar_row(
+                    theme, cx, index, selected, title, preview, mark, None, time, tab_order,
+                ));
+                tab_order += 1;
             }
         }
 
@@ -740,6 +767,7 @@ impl Shell {
 
         div()
             .id("chat-list")
+            .tab_group()
             .flex_1()
             .overflow_y_scroll()
             .pb(px(metrics::SPACE_2))
@@ -759,6 +787,7 @@ impl Shell {
         mark: AnyElement,
         presence: Option<Presence>,
         time: String,
+        tab_order: usize,
     ) -> AnyElement {
         let hover = theme.hover_wash();
         let background = if selected {
@@ -776,9 +805,38 @@ impl Shell {
             Some(bot_id) => ContextTarget::Bot(bot_id),
             None => ContextTarget::Team(chat.id),
         });
+        let accessible_label = format!("{title}; {preview}");
+        let focus_color = theme.focus;
 
         div()
             .id(("chat-row", index))
+            .role(gpui::Role::Button)
+            .aria_label(accessible_label)
+            .aria_description(if selected {
+                "Selected conversation"
+            } else {
+                "Select conversation"
+            })
+            .tab_index(tab_order as isize)
+            .focus_visible(move |style| style.border_1().border_color(focus_color))
+            .on_key_down(
+                cx.listener(|_this, event: &gpui::KeyDownEvent, window, cx| {
+                    match sidebar_navigation_direction(
+                        event.keystroke.key.as_str(),
+                        event.keystroke.modifiers.modified(),
+                    ) {
+                        Some(SidebarDirection::Previous) => {
+                            window.focus_prev(cx);
+                            cx.stop_propagation();
+                        }
+                        Some(SidebarDirection::Next) => {
+                            window.focus_next(cx);
+                            cx.stop_propagation();
+                        }
+                        None => {}
+                    }
+                }),
+            )
             .mx(px(metrics::SPACE_1))
             .px(px(metrics::SPACE_2))
             .h(px(metrics::SIDEBAR_ROW_HEIGHT))
@@ -863,6 +921,7 @@ impl Shell {
         bot: &Bot,
         time: String,
         mascot: AnyElement,
+        tab_order: usize,
     ) -> AnyElement {
         let hover = theme.hover_wash();
         let background = if selected {
@@ -871,12 +930,41 @@ impl Shell {
             theme.ink.opacity(0.0)
         };
         let target = ContextTarget::Bot(bot.id);
+        let accessible_label = format!("{}; {}; {}", bot.name, bot.role, bot.activity);
+        let focus_color = theme.focus;
 
         div()
             .id(("chat-row", index))
+            .role(gpui::Role::Button)
+            .aria_label(accessible_label)
+            .aria_description(if selected {
+                "Selected conversation"
+            } else {
+                "Select conversation"
+            })
+            .tab_index(tab_order as isize)
+            .focus_visible(move |style| style.border_1().border_color(focus_color))
+            .on_key_down(
+                cx.listener(|_this, event: &gpui::KeyDownEvent, window, cx| {
+                    match sidebar_navigation_direction(
+                        event.keystroke.key.as_str(),
+                        event.keystroke.modifiers.modified(),
+                    ) {
+                        Some(SidebarDirection::Previous) => {
+                            window.focus_prev(cx);
+                            cx.stop_propagation();
+                        }
+                        Some(SidebarDirection::Next) => {
+                            window.focus_next(cx);
+                            cx.stop_propagation();
+                        }
+                        None => {}
+                    }
+                }),
+            )
             .mx(px(metrics::SPACE_1))
             .px(px(metrics::SPACE_2))
-            .h(px(68.0))
+            .h(px(metrics::SIDEBAR_BOT_ROW_HEIGHT))
             .flex()
             .items_center()
             .gap(px(metrics::SPACE_2))
@@ -1007,5 +1095,30 @@ impl Shell {
                     ),
             )
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SidebarDirection, sidebar_navigation_direction};
+
+    #[test]
+    fn sidebar_rows_navigate_with_unmodified_vertical_arrows() {
+        assert_eq!(
+            sidebar_navigation_direction("up", false),
+            Some(SidebarDirection::Previous)
+        );
+        assert_eq!(
+            sidebar_navigation_direction("down", false),
+            Some(SidebarDirection::Next)
+        );
+    }
+
+    #[test]
+    fn sidebar_rows_leave_activation_keys_and_modified_arrows_to_gpui() {
+        assert_eq!(sidebar_navigation_direction("enter", false), None);
+        assert_eq!(sidebar_navigation_direction("space", false), None);
+        assert_eq!(sidebar_navigation_direction("up", true), None);
+        assert_eq!(sidebar_navigation_direction("down", true), None);
     }
 }

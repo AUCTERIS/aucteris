@@ -302,6 +302,7 @@ pub mod metrics {
     pub const MENU_WIDTH: f32 = 200.0;
     pub const MENU_ENTRY_HEIGHT: f32 = 44.0;
     pub const SIDEBAR_ROW_HEIGHT: f32 = 50.0;
+    pub const SIDEBAR_BOT_ROW_HEIGHT: f32 = 68.0;
     /// The role field beside a bot's name.
     pub const ROLE_FIELD_WIDTH: f32 = 150.0;
     pub const DIALOG_MAX_HEIGHT: f32 = 600.0;
