@@ -1,6 +1,6 @@
 # ROADMAP — Aucteris
 
-> Dernière mise à jour : 2026-11-23 · Positionnement : **Linux-first** · Permissions et UX
+> Dernière mise à jour : 2026-11-24 · Positionnement : **Linux-first** · Permissions et UX
 > d'abord, features ensuite
 
 Aucteris est un espace de travail local-first en Rust (GPUI + CLI) pour créer et faire
@@ -75,10 +75,9 @@ d'empiler des features.
       desktop ne dépend plus directement de komet-harness ; API interne stable
       (RunControls, événements, approvals, questions). S'appuie sur #3.
 - [x] **Découper les fichiers monolithiques** :
-      [dialog.rs](apps/desktop/src/presentation/ui/dialog.rs) (2 388 l.),
-      [chat.rs](apps/desktop/src/presentation/ui/chat.rs) (1 075 l.),
-      [shell.rs](apps/desktop/src/presentation/ui/shell.rs) (944 l.) — un module par
-      vue/composant.
+      [dialog.rs](apps/desktop/src/presentation/ui/dialog.rs) (599 l. + modules par vue),
+      [chat.rs](apps/desktop/src/presentation/ui/chat.rs) (236 l. + sous-modules),
+      [shell.rs](apps/desktop/src/presentation/ui/shell.rs) (366 l. + sous-modules).
 - [ ] **Centraliser l'état UI et la persistance** : un modèle d'actions unique, une
       écriture disque par mutation contrôlée (remplacer le compteur de génération).
 - [ ] **Tests de composants** : text_input, widgets, dialog — au moins les chemins
