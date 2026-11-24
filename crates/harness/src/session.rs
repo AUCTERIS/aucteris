@@ -73,6 +73,8 @@ pub enum Action {
         path: String,
         added: u32,
         removed: u32,
+        old_text: Option<String>,
+        new_text: String,
     },
     Settle(String),
     Error(String),
@@ -106,13 +108,17 @@ pub fn komet_backend(runtime: &str) -> Option<Arc<dyn Harness>> {
 /// The single backend resolution for every runtime id: komet driver first,
 /// then a core `RuntimeAdapter` wrapped as a session backend. `None` only
 /// when neither exists — never a silent fallback to a different runtime.
-pub fn backend(runtime: &str, registry: &RuntimeRegistry) -> Option<Arc<dyn Harness>> {
+pub fn backend(
+    runtime: &str,
+    registry: &RuntimeRegistry,
+    allowed_folders: Vec<std::path::PathBuf>,
+) -> Option<Arc<dyn Harness>> {
     let base = runtime.split(':').next().unwrap_or(runtime);
     komet_backend(base).or_else(|| {
-        registry
-            .get(base)
-            .ok()
-            .map(|adapter| Arc::new(CliBackend::new(adapter, base.to_string())) as Arc<dyn Harness>)
+        registry.get(base).ok().map(|adapter| {
+            Arc::new(CliBackend::new(adapter, base.to_string(), allowed_folders))
+                as Arc<dyn Harness>
+        })
     })
 }
 
@@ -382,7 +388,11 @@ fn emit(event: AgentEvent, out: &mpsc::UnboundedSender<EngineEvent>) -> Option<R
             let (label, detail) = tool_display(&call);
             Some(Action::Tool {
                 icon: tool_icon(&label),
-                activity: format!("Running {label}"),
+                activity: if label.starts_with("__internal_") {
+                    "Preparing the response…".to_string()
+                } else {
+                    "Working…".to_string()
+                },
                 label,
                 detail,
             })
@@ -399,6 +409,8 @@ fn emit(event: AgentEvent, out: &mpsc::UnboundedSender<EngineEvent>) -> Option<R
                     path: diff.path,
                     added,
                     removed,
+                    old_text: diff.old_text,
+                    new_text: diff.new_text,
                 }));
             }
             Some(Action::Settle(cap(output
@@ -468,24 +480,58 @@ fn cap(text: String) -> String {
 /// The two words a tool chip shows: what ran, and its most useful argument.
 fn tool_display(call: &ToolCall) -> (String, Option<String>) {
     match call {
-        ToolCall::Exec { command } => ("Bash".to_string(), Some(command.clone())),
-        ToolCall::ReadFile { path } => ("Read".to_string(), Some(path.clone())),
-        ToolCall::WriteFile { path, .. } => ("Write".to_string(), Some(path.clone())),
-        ToolCall::EditFile { path, .. } => ("Edit".to_string(), Some(path.clone())),
-        ToolCall::ApplyPatch { path } => ("Patch".to_string(), path.clone()),
-        ToolCall::Search { pattern, path } => (
-            "Grep".to_string(),
-            Some(match path {
-                Some(path) => format!("{pattern} in {path}"),
-                None => pattern.clone(),
-            }),
+        ToolCall::Exec { command } if is_internal_agent_setup(command) => {
+            ("__internal_setup".to_string(), None)
+        }
+        ToolCall::Exec { .. } => ("Running a command".to_string(), None),
+        ToolCall::ReadFile { path } => ("Reading a file".to_string(), file_name(path)),
+        ToolCall::WriteFile { path, .. } | ToolCall::EditFile { path, .. } => {
+            ("Updating a file".to_string(), file_name(path))
+        }
+        ToolCall::ApplyPatch { path } => (
+            "Updating a file".to_string(),
+            path.as_deref().and_then(file_name),
         ),
-        ToolCall::Glob { pattern } => ("Glob".to_string(), Some(pattern.clone())),
-        ToolCall::WebFetch { url, .. } => ("Fetch".to_string(), Some(url.clone())),
-        ToolCall::WebSearch { query } => ("Search".to_string(), Some(query.clone())),
-        ToolCall::Todo { items } => ("Plan".to_string(), Some(format!("{} steps", items.len()))),
-        ToolCall::Mcp { tool, .. } => (tool.clone(), None),
-        ToolCall::Unknown { name, .. } => (name.clone(), None),
+        ToolCall::Search { .. } => ("Searching files".to_string(), None),
+        ToolCall::Glob { .. } => ("Finding files".to_string(), None),
+        ToolCall::WebFetch { .. } => ("Opening a webpage".to_string(), None),
+        ToolCall::WebSearch { .. } => ("Searching the web".to_string(), None),
+        ToolCall::Todo { items } => (
+            "Planning next steps".to_string(),
+            Some(format!("{} items", items.len())),
+        ),
+        ToolCall::Mcp { tool, .. } => (connected_tool_label(tool), None),
+        ToolCall::Unknown { .. } => ("Using a connected tool".to_string(), None),
+    }
+}
+
+fn file_name(path: &str) -> Option<String> {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
+}
+
+fn is_internal_agent_setup(command: &str) -> bool {
+    let command = command.to_ascii_lowercase();
+    command.contains("session_start")
+        || command.contains("prompt-hook")
+        || command.contains(".claude/skills/")
+        || command.contains(".codex/hooks/")
+}
+
+fn connected_tool_label(tool: &str) -> String {
+    let tool = tool.to_ascii_lowercase();
+    if tool.contains("notion") {
+        "Using Notion".to_string()
+    } else if tool.contains("google") || tool.contains("drive") {
+        "Using Google Drive".to_string()
+    } else if tool.contains("slack") {
+        "Using Slack".to_string()
+    } else if tool.contains("browser") || tool.contains("web") {
+        "Using the browser".to_string()
+    } else {
+        "Using a connected app".to_string()
     }
 }
 
@@ -514,7 +560,17 @@ fn diff_counts(diff: &ToolDiff) -> (u32, u32) {
 /// Icon id for a tool label, drawn from the bundled glyph set.
 pub fn tool_icon(name: &str) -> &'static str {
     let normalized = name.to_ascii_lowercase();
-    if normalized.contains("bash")
+    if normalized.contains("notion") {
+        "notion"
+    } else if normalized.contains("google") || normalized.contains("drive") {
+        "google-color"
+    } else if normalized.contains("slack") {
+        // The tool is a workspace conversation action; no Slack glyph ships
+        // in LobeHub Icons, so use the built-in people glyph as its cue.
+        "users"
+    } else if normalized.contains("plan") {
+        "sparkle"
+    } else if normalized.contains("bash")
         || normalized.contains("command")
         || normalized.contains("terminal")
     {
@@ -528,6 +584,7 @@ pub fn tool_icon(name: &str) -> &'static str {
     } else if normalized.contains("search")
         || normalized.contains("grep")
         || normalized.contains("glob")
+        || normalized.contains("finding files")
     {
         "search"
     } else if normalized.contains("web")

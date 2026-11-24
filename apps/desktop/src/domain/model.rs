@@ -3,8 +3,9 @@
 //! This is deliberately plain data — no entities, no async. The shell owns one
 //! [`Workspace`] is the UI's persisted view of the integrated local engine.
 
-use aucteris_harness::komet_proto::SandboxLevel;
+use aucteris_harness::komet_proto::{PermissionChoice, SandboxLevel};
 use gpui::SharedString;
+use std::time::Instant;
 
 /// Sidebar/message timestamp label. `HH:MM` local time — the sidebar shows
 /// the last-activity clock time; there is no date granularity yet.
@@ -20,15 +21,6 @@ pub fn sandbox_label(level: SandboxLevel) -> &'static str {
         SandboxLevel::ReadOnly => "Read-only",
         SandboxLevel::WorkspaceWrite => "Workspace write",
         SandboxLevel::DangerFullAccess => "Full access",
-    }
-}
-
-/// Next sandbox level in the cycle a click walks through.
-pub fn next_sandbox(level: SandboxLevel) -> SandboxLevel {
-    match level {
-        SandboxLevel::ReadOnly => SandboxLevel::WorkspaceWrite,
-        SandboxLevel::WorkspaceWrite => SandboxLevel::DangerFullAccess,
-        SandboxLevel::DangerFullAccess => SandboxLevel::ReadOnly,
     }
 }
 
@@ -55,128 +47,56 @@ impl Presence {
     }
 }
 
-/// The 26 expressive mascot shapes from Grok Bot.
+/// The eight Aucteris mascots: basic geometric shapes, one per bot identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MascotShape {
-    Arch,
-    Bean,
-    Blob,
-    Capsule,
-    Cloud,
-    Clover,
-    Crystal,
-    Cylinder,
-    Dome,
-    Egg,
-    Flower,
-    Gem,
-    Heart,
-    Hex,
-    House,
-    Leaf,
-    Pebble,
-    Pumpkin,
-    Shield,
     #[default]
-    Sparkle,
+    Circle,
+    Triangle,
     Square,
-    Squircle,
+    Diamond,
+    Pentagon,
+    Hexagon,
+    Octagon,
     Star,
-    Tablet,
-    Teardrop,
-    Wedge,
 }
 
 impl MascotShape {
-    pub const ALL: [MascotShape; 26] = [
-        MascotShape::Arch,
-        MascotShape::Bean,
-        MascotShape::Blob,
-        MascotShape::Capsule,
-        MascotShape::Cloud,
-        MascotShape::Clover,
-        MascotShape::Crystal,
-        MascotShape::Cylinder,
-        MascotShape::Dome,
-        MascotShape::Egg,
-        MascotShape::Flower,
-        MascotShape::Gem,
-        MascotShape::Heart,
-        MascotShape::Hex,
-        MascotShape::House,
-        MascotShape::Leaf,
-        MascotShape::Pebble,
-        MascotShape::Pumpkin,
-        MascotShape::Shield,
-        MascotShape::Sparkle,
+    pub const ALL: [MascotShape; 8] = [
+        MascotShape::Circle,
+        MascotShape::Triangle,
         MascotShape::Square,
-        MascotShape::Squircle,
+        MascotShape::Diamond,
+        MascotShape::Pentagon,
+        MascotShape::Hexagon,
+        MascotShape::Octagon,
         MascotShape::Star,
-        MascotShape::Tablet,
-        MascotShape::Teardrop,
-        MascotShape::Wedge,
     ];
 
     pub fn id_str(self) -> &'static str {
         match self {
-            Self::Arch => "arch",
-            Self::Bean => "bean",
-            Self::Blob => "blob",
-            Self::Capsule => "capsule",
-            Self::Cloud => "cloud",
-            Self::Clover => "clover",
-            Self::Crystal => "crystal",
-            Self::Cylinder => "cylinder",
-            Self::Dome => "dome",
-            Self::Egg => "egg",
-            Self::Flower => "flower",
-            Self::Gem => "gem",
-            Self::Heart => "heart",
-            Self::Hex => "hex",
-            Self::House => "house",
-            Self::Leaf => "leaf",
-            Self::Pebble => "pebble",
-            Self::Pumpkin => "pumpkin",
-            Self::Shield => "shield",
-            Self::Sparkle => "sparkle",
+            Self::Circle => "circle",
+            Self::Triangle => "triangle",
             Self::Square => "square",
-            Self::Squircle => "squircle",
+            Self::Diamond => "diamond",
+            Self::Pentagon => "pentagon",
+            Self::Hexagon => "hexagon",
+            Self::Octagon => "octagon",
             Self::Star => "star",
-            Self::Tablet => "tablet",
-            Self::Teardrop => "teardrop",
-            Self::Wedge => "wedge",
         }
     }
 
     #[allow(dead_code)]
     pub fn label(self) -> &'static str {
         match self {
-            Self::Arch => "Arch",
-            Self::Bean => "Bean",
-            Self::Blob => "Blob",
-            Self::Capsule => "Capsule",
-            Self::Cloud => "Cloud",
-            Self::Clover => "Clover",
-            Self::Crystal => "Crystal",
-            Self::Cylinder => "Cylinder",
-            Self::Dome => "Dome",
-            Self::Egg => "Egg",
-            Self::Flower => "Flower",
-            Self::Gem => "Gem",
-            Self::Heart => "Heart",
-            Self::Hex => "Hexagon",
-            Self::House => "House",
-            Self::Leaf => "Leaf",
-            Self::Pebble => "Pebble",
-            Self::Pumpkin => "Pumpkin",
-            Self::Shield => "Shield",
-            Self::Sparkle => "Sparkle",
+            Self::Circle => "Circle",
+            Self::Triangle => "Triangle",
             Self::Square => "Square",
-            Self::Squircle => "Squircle",
+            Self::Diamond => "Diamond",
+            Self::Pentagon => "Pentagon",
+            Self::Hexagon => "Hexagon",
+            Self::Octagon => "Octagon",
             Self::Star => "Star",
-            Self::Tablet => "Tablet",
-            Self::Teardrop => "Teardrop",
-            Self::Wedge => "Wedge",
         }
     }
 
@@ -193,6 +113,7 @@ impl MascotShape {
 #[derive(Debug, Clone)]
 pub struct Bot {
     pub id: u32,
+    pub pinned: bool,
     pub name: SharedString,
     /// What this bot is for, in one word: Research, Engineering, Writing…
     pub role: SharedString,
@@ -205,7 +126,10 @@ pub struct Bot {
     pub presence: Presence,
     /// One line under the name in the sidebar: what it is doing or did.
     pub activity: SharedString,
+    /// Private, automatically assigned workspace for this bot.
     pub folder: SharedString,
+    /// Additional user-approved directories available to this bot.
+    pub allowed_folders: Vec<String>,
     pub instructions: SharedString,
     pub tokens: u64,
     /// Last context-window limit the runtime reported for this bot's
@@ -221,6 +145,10 @@ pub struct Bot {
 #[derive(Debug, Clone)]
 pub enum Part {
     Text(String),
+    /// A file selected by the user and attached to their prompt.
+    Attachment {
+        path: String,
+    },
     /// Collapsible reasoning / thought process block (like Grok / Cursor reasoning mode).
     Thought {
         text: String,
@@ -233,14 +161,25 @@ pub enum Part {
         detail: Option<String>,
         /// `false` while the step is still running.
         done: bool,
+        /// The step settled with an error rather than a result.
+        failed: bool,
         /// The result line once the step settled.
         result: Option<String>,
+        /// Real elapsed time recorded when the action settles.
+        duration_ms: Option<u64>,
+        /// Monotonic start instant for a live action (not persisted).
+        started_at: Option<Instant>,
     },
     /// A file the bot touched, with its diff size.
     Files {
         path: String,
         added: u32,
         removed: u32,
+        #[allow(dead_code)]
+        old_text: Option<String>,
+        new_text: Option<String>,
+        diff_expanded: bool,
+        undo_error: Option<String>,
         undone: bool,
     },
     /// Something the bot changed outside the chat, with a way back.
@@ -256,7 +195,9 @@ pub enum Part {
         /// Pending permission request this card answers, if any.
         request: Option<u64>,
         /// One button per choice: label, and whether it allows the action.
-        choices: Vec<(String, bool)>,
+        choices: Vec<(String, PermissionChoice)>,
+        /// Index of the additional "allow and add folder" choice, if any.
+        grant_folder_choice: Option<usize>,
         resolved: Option<String>,
     },
     /// A question the agent asked and is blocked on. One card per question.
@@ -275,6 +216,25 @@ pub enum Part {
     },
 }
 
+/// Hide host-side lifecycle hooks from the user-facing transcript. Older
+/// saved messages used to keep the hook command in a Bash label or detail.
+pub fn is_internal_tool(label: &str, detail: Option<&str>) -> bool {
+    let label = label.to_ascii_lowercase();
+    if label.starts_with("__internal_")
+        || label.starts_with("ran hook:")
+        || label.starts_with("run hook:")
+    {
+        return true;
+    }
+    detail.is_some_and(|detail| {
+        let detail = detail.to_ascii_lowercase();
+        detail.contains("session_start")
+            || detail.contains("prompt-hook")
+            || detail.contains(".claude/skills/")
+            || detail.contains(".codex/hooks/")
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Author {
     You,
@@ -291,34 +251,34 @@ pub struct Message {
     pub parts: Vec<Part>,
     pub time: SharedString,
     pub streaming: bool,
+    /// Total wall-clock duration of an assistant run, retained in history.
+    pub duration_ms: Option<u64>,
+    /// Monotonic start instant for an active run (not persisted).
+    pub started_at: Option<Instant>,
+    /// Whether the chronological reasoning and tool activity is expanded.
+    pub activity_expanded: bool,
     /// Set when the person stopped the run mid-answer.
     pub stopped: bool,
 }
 
 impl Message {
+    pub fn finish_stream(&mut self) {
+        self.streaming = false;
+        self.duration_ms = self
+            .started_at
+            .take()
+            .map(|start| start.elapsed().as_millis() as u64);
+    }
+
     pub fn text(&self) -> String {
         let mut out = String::new();
         for part in &self.parts {
             match part {
                 Part::Text(text) => out.push_str(text),
-                Part::Thought { text, .. } => {
-                    if !out.is_empty() {
-                        out.push(' ');
-                    }
-                    out.push_str(text);
-                }
-                Part::Tool { label, .. } => {
-                    if !out.is_empty() {
-                        out.push(' ');
-                    }
-                    out.push_str(label);
-                }
-                Part::Files { path, .. } => {
-                    if !out.is_empty() {
-                        out.push(' ');
-                    }
-                    out.push_str(path);
-                }
+                Part::Thought { .. }
+                | Part::Tool { .. }
+                | Part::Files { .. }
+                | Part::Attachment { .. } => {}
                 Part::Note { text, .. } => {
                     if !out.is_empty() {
                         out.push(' ');
@@ -385,17 +345,34 @@ impl Message {
 
     /// Close the running tool step, if there is one.
     pub fn finish_last_tool(&mut self, result: Option<String>) {
+        self.settle_last_tool(result, false);
+    }
+
+    /// Close the running tool step and mark it as failed.
+    pub fn fail_last_tool(&mut self, result: Option<String>) {
+        self.settle_last_tool(result, true);
+    }
+
+    fn settle_last_tool(&mut self, result: Option<String>, failed: bool) {
         let running = self
             .parts
             .iter_mut()
             .rev()
             .find(|part| matches!(part, Part::Tool { done: false, .. }));
         if let Some(Part::Tool {
-            done, result: slot, ..
+            done,
+            failed: slot_failed,
+            result: slot,
+            duration_ms,
+            started_at,
+            ..
         }) = running
         {
             *done = true;
+            *slot_failed = failed;
             *slot = result;
+            *duration_ms = started_at.map(|start| start.elapsed().as_millis() as u64);
+            *started_at = None;
         }
     }
 }
@@ -403,6 +380,7 @@ impl Message {
 #[derive(Debug, Clone)]
 pub struct Chat {
     pub id: u32,
+    pub pinned: bool,
     pub title: SharedString,
     /// `Some` for a direct chat, `None` for a room.
     pub bot: Option<u32>,
@@ -494,18 +472,24 @@ impl Workspace {
     }
 
     pub fn replace_last_preview(&mut self) {
-        if let Some(message) = self
-            .chats
-            .get(self.selected)
-            .and_then(|chat| chat.messages.last())
-        {
-            let preview = message.text();
-            let preview = preview.replace('\n', " ");
-            let short: String = preview.chars().take(72).collect();
-            let chat = self.chat_mut();
-            chat.preview = SharedString::from(short);
-            chat.time = timestamp_now();
-        }
+        let chat_id = self.chat().id;
+        self.replace_preview_for(chat_id);
+    }
+
+    /// Refresh one chat's sidebar preview, whichever chat is selected. A run
+    /// keeps writing to its own chat while the person looks elsewhere.
+    pub fn replace_preview_for(&mut self, chat_id: u32) {
+        let Some(chat) = self.chats.iter_mut().find(|chat| chat.id == chat_id) else {
+            return;
+        };
+        let Some(message) = chat.messages.last() else {
+            return;
+        };
+        let preview = message.text();
+        let preview = preview.replace('\n', " ");
+        let short: String = preview.chars().take(72).collect();
+        chat.preview = SharedString::from(short);
+        chat.time = timestamp_now();
     }
 }
 
@@ -534,6 +518,12 @@ pub enum Mode {
     Advanced,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppearancePreference {
+    Dark,
+    Light,
+}
+
 impl Mode {
     pub fn label(self) -> &'static str {
         match self {
@@ -555,6 +545,10 @@ impl Mode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     pub mode: Mode,
+    /// `None` follows the operating-system appearance.
+    pub appearance: Option<AppearancePreference>,
+    /// Installed agent CLIs hidden from model pickers.
+    pub disabled_runtimes: Vec<String>,
     /// Stable CLI runtime id assigned to new bots.
     pub default_runtime: String,
     /// Enter sends. Off means Enter is a line break and Ctrl+Enter sends.
@@ -565,8 +559,76 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             mode: Mode::Simple,
+            appearance: None,
+            disabled_runtimes: Vec::new(),
             default_runtime: "codex".to_string(),
             send_on_enter: true,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reply_with_running_tool() -> Message {
+        Message {
+            author: Author::Bot,
+            bot: Some(1),
+            parts: vec![Part::Tool {
+                icon: "terminal",
+                label: "cargo test".to_string(),
+                detail: None,
+                done: false,
+                failed: false,
+                result: None,
+                duration_ms: None,
+                started_at: Some(Instant::now()),
+            }],
+            time: "now".into(),
+            streaming: true,
+            duration_ms: None,
+            started_at: Some(Instant::now()),
+            activity_expanded: false,
+            stopped: false,
+        }
+    }
+
+    #[test]
+    fn finishing_a_tool_marks_it_done_without_failure() {
+        let mut message = reply_with_running_tool();
+        message.finish_last_tool(Some("ok".to_string()));
+        match &message.parts[0] {
+            Part::Tool {
+                done,
+                failed,
+                result,
+                ..
+            } => {
+                assert!(*done);
+                assert!(!*failed);
+                assert_eq!(result.as_deref(), Some("ok"));
+            }
+            other => panic!("expected a tool part, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn failing_a_tool_marks_it_done_and_failed() {
+        let mut message = reply_with_running_tool();
+        message.fail_last_tool(Some("Run failed".to_string()));
+        match &message.parts[0] {
+            Part::Tool {
+                done,
+                failed,
+                result,
+                ..
+            } => {
+                assert!(*done);
+                assert!(*failed);
+                assert_eq!(result.as_deref(), Some("Run failed"));
+            }
+            other => panic!("expected a tool part, got {other:?}"),
         }
     }
 }

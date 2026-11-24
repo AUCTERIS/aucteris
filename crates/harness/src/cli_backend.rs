@@ -33,13 +33,19 @@ use tokio::sync::mpsc;
 pub struct CliBackend {
     adapter: Arc<dyn RuntimeAdapter>,
     runtime: String,
+    allowed_folders: Vec<PathBuf>,
 }
 
 impl CliBackend {
-    pub fn new(adapter: Arc<dyn RuntimeAdapter>, runtime: impl Into<String>) -> Self {
+    pub fn new(
+        adapter: Arc<dyn RuntimeAdapter>,
+        runtime: impl Into<String>,
+        allowed_folders: Vec<PathBuf>,
+    ) -> Self {
         Self {
             adapter,
             runtime: runtime.into(),
+            allowed_folders,
         }
     }
 }
@@ -134,6 +140,12 @@ impl Harness for CliBackend {
         }
 
         // The core adapter is synchronous: run it on the blocking pool.
+        let mut mounts = adapter.sandbox_mounts();
+        for folder in &self.allowed_folders {
+            if !mounts.rw_dirs.contains(folder) {
+                mounts.rw_dirs.push(folder.clone());
+            }
+        }
         let core_req = CoreRunRequest {
             workspace: workspace.clone(),
             prompt: request.prompt.clone(),
@@ -144,7 +156,7 @@ impl Harness for CliBackend {
             // bubblewrap when available, honest degradation otherwise.
             sandbox: Some(SandboxPlan {
                 workspace: workspace.clone(),
-                mounts: adapter.sandbox_mounts(),
+                mounts,
                 allow_network: true,
             }),
             cgroup_name: None,

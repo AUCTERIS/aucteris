@@ -5,19 +5,34 @@
 //! bot_panel.rs) so a click can mutate the one source of truth without an
 //! event bus.
 
+mod actions;
+mod keys;
+mod run;
+
 use gpui::{
-    App, Context, FocusHandle, Focusable, KeyDownEvent, Render, ScrollHandle, SharedString, Window,
-    div, prelude::*, px,
+    App, Context, FocusHandle, Focusable, Pixels, Point, Render, ScrollHandle, SharedString, Task,
+    Window, div, prelude::*, px,
 };
 
-use crate::application::engine::{self, Action, EngineEvent};
-use crate::domain::model::{self, Author, Message, Part, Presence, Settings, Workspace};
+use crate::application::engine;
+use crate::domain::model::{AppearancePreference, Settings, Workspace};
 use crate::infrastructure::storage::AppStorage;
 use crate::presentation::theme::{Appearance, Theme, metrics, text as typo};
 use crate::presentation::ui::dialog::{Dialog, ProviderPicker};
-use aucteris_harness::komet_proto::{PermissionChoice, PermissionKind, Scope};
+use aucteris_harness::komet_proto::{PermissionChoice, Scope};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ContextTarget {
+    Bot(u32),
+    Team(u32),
+}
+
+fn show_right_panel(panel_open: bool, window_width: f32) -> bool {
+    panel_open && window_width >= metrics::PANEL_COLLAPSE_WIDTH
+}
 
 pub struct Shell {
     pub(crate) workspace: Workspace,
@@ -28,10 +43,14 @@ pub struct Shell {
 
     /// What the person is typing in the composer.
     pub(crate) draft: String,
+    /// Preserved drafts for chats the person is not looking at. Keyed by chat
+    /// id, in memory only: a draft is not a document worth syncing to disk.
+    pub(crate) drafts: HashMap<u32, String>,
     /// What they are typing in the sidebar search.
     pub(crate) search: String,
     pub(crate) searching: bool,
     pub(crate) panel_open: bool,
+    pub(crate) sidebar_collapsed: bool,
 
     pub(crate) focus: FocusHandle,
     pub(crate) search_focus: FocusHandle,
@@ -46,15 +65,24 @@ pub struct Shell {
     /// form's dropdown, with its own search/rail/scroll state.
     pub(crate) panel_picker: ProviderPicker,
     pub(crate) panel_picker_focus: FocusHandle,
+    pub(crate) panel_picker_position: Option<Point<Pixels>>,
+    pub(crate) permissions_open: bool,
+    pub(crate) permissions_position: Option<Point<Pixels>>,
     /// Blink phase of the dialog form caret; any keystroke forces it on.
     pub(crate) caret_visible: bool,
     /// The sidebar's "+" menu: New bot / New team.
     pub(crate) create_menu_open: bool,
+    pub(crate) context_menu: Option<(ContextTarget, Point<Pixels>)>,
+    pub(crate) provider_expanded: HashSet<String>,
+    /// Expanded long code blocks in the transcript, keyed by stable view id.
+    pub(crate) expanded_code_blocks: HashSet<usize>,
+    /// Files selected for the draft in each conversation.
+    pub(crate) draft_attachments: HashMap<u32, Vec<String>>,
 
-    /// Bumped to abandon a run in flight. The loop compares it after every
-    /// sleep, so Stop needs no cancellation plumbing.
-    generation: u64,
-    saw_assistant_text: bool,
+    /// The UI task consuming the in-flight run's events. Dropping it cancels
+    /// the loop, so a stale run can never write into a newer one — no
+    /// generation counter needed.
+    pub(crate) run_task: Option<Task<()>>,
     pub(crate) run_bot: Option<u32>,
     /// Chat whose run is in flight. Runs are per chat, not global.
     pub(crate) run_chat: Option<u32>,
@@ -73,6 +101,18 @@ impl Shell {
     ) -> Self {
         let storage = AppStorage::new(engine.data_dir());
         let (workspace, settings) = storage.load();
+        let appearance = match settings.appearance {
+            Some(AppearancePreference::Dark) => Appearance::Dark,
+            Some(AppearancePreference::Light) => Appearance::Light,
+            None => appearance,
+        };
+        let current_theme = Theme::of(cx);
+        let font_sans = current_theme.font_sans.clone();
+        let font_mono = current_theme.font_mono.clone();
+        let mut theme = Theme::for_appearance(appearance);
+        theme.font_sans = font_sans;
+        theme.font_mono = font_mono;
+        cx.set_global(theme);
         let available_runtimes = engine.available_runtimes().to_vec();
         // Ask each installed CLI which models it accepts, off the UI thread.
         // Until they answer, the picker shows the built-in catalog.
@@ -109,9 +149,11 @@ impl Shell {
             available_runtimes,
             appearance,
             draft: String::new(),
+            drafts: HashMap::new(),
             search: String::new(),
             searching: false,
             panel_open: false,
+            sidebar_collapsed: false,
             focus: cx.focus_handle(),
             search_focus: cx.focus_handle(),
             dialog_focus: cx.focus_handle(),
@@ -120,10 +162,16 @@ impl Shell {
             dialog: None,
             panel_picker: ProviderPicker::default(),
             panel_picker_focus: cx.focus_handle(),
+            panel_picker_position: None,
+            permissions_open: false,
+            permissions_position: None,
             caret_visible: true,
             create_menu_open: false,
-            generation: 0,
-            saw_assistant_text: false,
+            context_menu: None,
+            provider_expanded: HashSet::new(),
+            expanded_code_blocks: HashSet::new(),
+            draft_attachments: HashMap::new(),
+            run_task: None,
             run_bot: None,
             run_chat: None,
             status: None,
@@ -137,81 +185,15 @@ impl Shell {
             eprintln!("failed to save Aucteris desktop state: {error:#}");
         }
     }
-
-    /// Register a finished team: title and members chosen in the dialog.
-    pub(crate) fn create_team(&mut self, title: String, members: Vec<u32>, cx: &mut Context<Self>) {
-        let id = self
-            .workspace
-            .chats
-            .iter()
-            .map(|chat| chat.id)
-            .max()
-            .unwrap_or(0)
-            + 1;
-        self.workspace.chats.push(model::Chat {
-            id,
-            title: title.into(),
-            bot: None,
-            members: members.clone(),
-            messages: Vec::new(),
-            preview: if members.is_empty() {
-                "Add bots to start this team".into()
-            } else {
-                format!("{} bots in this team", members.len()).into()
-            },
-            time: model::timestamp_now(),
-            session_id: None,
-        });
-        self.workspace.selected = self.workspace.chats.len() - 1;
-        self.panel_open = true;
-        self.scroll.scroll_to_bottom();
-        self.persist_workspace();
-        cx.notify();
-    }
-
-    pub(crate) fn add_bot_to_room(&mut self, room_id: u32, bot_id: u32, cx: &mut Context<Self>) {
-        let Some(room) = self
-            .workspace
-            .chats
-            .iter_mut()
-            .find(|chat| chat.id == room_id && chat.is_room())
-        else {
-            return;
-        };
-        if !room.members.contains(&bot_id) {
-            room.members.push(bot_id);
-            room.preview = format!("{} bots in this team", room.members.len()).into();
-            self.persist_workspace();
-            cx.notify();
-        }
-    }
-
-    pub(crate) fn remove_bot_from_room(
-        &mut self,
-        room_id: u32,
-        bot_id: u32,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(room) = self
-            .workspace
-            .chats
-            .iter_mut()
-            .find(|chat| chat.id == room_id && chat.is_room())
-        else {
-            return;
-        };
-        room.members.retain(|id| *id != bot_id);
-        room.preview = if room.members.is_empty() {
-            "Add bots to start this team".into()
-        } else {
-            format!("{} bots in this team", room.members.len()).into()
-        };
-        self.persist_workspace();
-        cx.notify();
-    }
-
     pub(crate) fn running(&self) -> bool {
         self.status.is_some() && self.run_bot.is_some()
+    }
+
+    /// Whether the chat on screen is the one the live run belongs to. A run
+    /// keeps going while the person reads another chat; its Stop control and
+    /// status strip only appear where the run actually writes.
+    pub(crate) fn running_here(&self) -> bool {
+        self.running() && self.run_chat == Some(self.workspace.chat().id)
     }
 
     /// Whether the composer's Send can steer the run in flight.
@@ -231,15 +213,53 @@ impl Shell {
     // ---- selection -------------------------------------------------------
 
     pub(crate) fn select_chat(&mut self, index: usize, cx: &mut Context<Self>) {
-        if self.running() {
-            return;
-        }
+        self.stash_draft();
         self.workspace.select(index);
         self.searching = false;
         self.search.clear();
         self.panel_picker.open = false;
+        self.restore_draft();
         self.scroll.scroll_to_bottom();
         cx.notify();
+    }
+
+    /// Keep the text with the chat it was written for before switching.
+    pub(crate) fn stash_draft(&mut self) {
+        let chat_id = self.workspace.chat().id;
+        if self.draft.is_empty() {
+            self.drafts.remove(&chat_id);
+        } else {
+            self.drafts.insert(chat_id, self.draft.clone());
+        }
+    }
+
+    /// Bring back the draft that belongs to the newly selected chat.
+    pub(crate) fn restore_draft(&mut self) {
+        let chat_id = self.workspace.chat().id;
+        self.draft = self.drafts.remove(&chat_id).unwrap_or_default();
+    }
+
+    /// Forget the current draft once it has been sent.
+    pub(crate) fn clear_draft(&mut self) {
+        self.draft.clear();
+        let chat_id = self.workspace.chat().id;
+        self.drafts.remove(&chat_id);
+        self.draft_attachments.remove(&chat_id);
+    }
+
+    /// Whether the transcript is close enough to the bottom to keep following
+    /// new output. A reader who scrolled up owns the viewport.
+    pub(crate) fn follows_bottom(&self) -> bool {
+        let offset = self.scroll.offset();
+        let max = self.scroll.max_offset();
+        (max.y - offset.y) <= px(metrics::SPACE_5)
+    }
+
+    /// Scroll only when the person was already reading the latest message.
+    pub(crate) fn scroll_if_following(&self) {
+        if self.follows_bottom() {
+            self.scroll.scroll_to_bottom();
+        }
     }
 
     /// The sidebar row for a bot, or a room, by title.
@@ -248,618 +268,6 @@ impl Shell {
             .chats
             .iter()
             .position(|chat| chat.bot == Some(bot))
-    }
-
-    // ---- the run ---------------------------------------------------------
-
-    /// Send the composer's contents to whoever should answer.
-    pub(crate) fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let prompt = self.draft.trim().to_string();
-        if prompt.is_empty() {
-            return;
-        }
-        // A question offering free text takes the next line typed here.
-        if let Some((request, index)) = self.free_text_question.take() {
-            self.draft.clear();
-            self.engine
-                .answer_question(request, index, Vec::new(), Some(prompt.clone()));
-            self.mark_question(request, index, prompt);
-            cx.notify();
-            return;
-        }
-        // A live run that supports steering takes the prompt as an injection
-        // into the same turn instead of starting a new one.
-        if self.running() {
-            let chat_id = self.workspace.chat().id;
-            if self.run_chat == Some(chat_id)
-                && self.engine.can_steer(chat_id)
-                && self.engine.steer(chat_id, prompt.clone())
-            {
-                self.draft.clear();
-                self.workspace.chat_mut().messages.push(Message {
-                    author: Author::You,
-                    bot: None,
-                    parts: vec![Part::Text(prompt)],
-                    time: model::timestamp_now(),
-                    streaming: false,
-                    stopped: false,
-                });
-                self.workspace.replace_last_preview();
-                cx.notify();
-            }
-            return;
-        }
-        let Some(bot_id) = self.workspace.responder() else {
-            self.workspace.chat_mut().messages.push(Message {
-                author: Author::System,
-                bot: None,
-                parts: vec![Part::Text(
-                    "No bot in this room can answer — add one first.".to_string(),
-                )],
-                time: model::timestamp_now(),
-                streaming: false,
-                stopped: false,
-            });
-            self.workspace.replace_last_preview();
-            self.persist_workspace();
-            cx.notify();
-            return;
-        };
-        let Some(bot) = self.workspace.bot(bot_id) else {
-            return;
-        };
-        let run_config = engine::BotRunConfig {
-            runtime: bot.runtime.to_string(),
-            folder: bot.folder.to_string(),
-            instructions: bot.instructions.to_string(),
-            resume: self.workspace.chat().session_id.clone(),
-            sandbox: bot.sandbox,
-        };
-        let bot_id = bot.id;
-        if !engine::Engine::runtime_usable(&run_config.runtime) {
-            let label = self.engine.runtime_label(&run_config.runtime);
-            self.workspace.chat_mut().messages.push(Message {
-                author: Author::Bot,
-                bot: Some(bot_id),
-                parts: vec![Part::Text(format!(
-                    "Run failed: {label} is not installed or not on PATH."
-                ))],
-                time: model::timestamp_now(),
-                streaming: false,
-                stopped: false,
-            });
-            self.workspace.replace_last_preview();
-            self.persist_workspace();
-            cx.notify();
-            return;
-        }
-
-        self.draft.clear();
-        let chat = self.workspace.chat_mut();
-        chat.messages.push(Message {
-            author: Author::You,
-            bot: None,
-            parts: vec![Part::Text(prompt.clone())],
-            time: model::timestamp_now(),
-            streaming: false,
-            stopped: false,
-        });
-        chat.messages.push(Message {
-            author: Author::Bot,
-            bot: Some(bot_id),
-            parts: Vec::new(),
-            time: model::timestamp_now(),
-            streaming: true,
-            stopped: false,
-        });
-        if let Some(bot) = self.workspace.bot_mut(bot_id) {
-            bot.presence = Presence::Working;
-            bot.activity = "Starting…".into();
-        }
-        self.workspace.replace_last_preview();
-        self.status = Some("Starting…".into());
-        self.run_bot = Some(bot_id);
-        self.run_chat = Some(self.workspace.chat().id);
-        self.generation += 1;
-        self.saw_assistant_text = false;
-        let generation = self.generation;
-        self.scroll.scroll_to_bottom();
-        self.persist_workspace();
-
-        let engine = Arc::clone(&self.engine);
-        let chat_id = self.workspace.chat().id;
-        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-        std::thread::spawn(move || engine.run_prompt(chat_id, run_config, prompt, sender));
-
-        cx.spawn_in(window, async move |this, cx| {
-            while let Some(event) = receiver.recv().await {
-                let applied = this.update(cx, |shell, cx| {
-                    if shell.generation != generation {
-                        return false;
-                    }
-                    match event {
-                        EngineEvent::Action(action) => shell.apply(action, cx),
-                        EngineEvent::SessionId(session_id) => {
-                            shell.workspace.chat_mut().session_id = Some(session_id);
-                            shell.persist_workspace();
-                        }
-                        EngineEvent::Permission {
-                            id,
-                            kind,
-                            summary,
-                            choices,
-                            tool_call_id,
-                        } => {
-                            let mut detail = match &kind {
-                                PermissionKind::Tool { name } => format!("tool · {name}"),
-                                PermissionKind::Command { cmdline } => cmdline.clone(),
-                                PermissionKind::FileWrite { path } => format!("write · {path}"),
-                            };
-                            if let Some(call) = tool_call_id {
-                                detail.push_str(&format!(" · {call}"));
-                            }
-                            let buttons = choices
-                                .iter()
-                                .map(|choice| (permission_label(choice), !is_deny(choice)))
-                                .collect();
-                            shell.waiting(Part::Approval {
-                                kicker: "Permission".to_string(),
-                                title: summary,
-                                detail,
-                                request: Some(id),
-                                choices: buttons,
-                                resolved: None,
-                            });
-                            shell.set_waiting("Waiting for your approval…", cx);
-                        }
-                        EngineEvent::Questions { id, questions } => {
-                            let count = questions.len();
-                            for (index, question) in questions.into_iter().enumerate() {
-                                let header = if question.header.trim().is_empty() {
-                                    format!("Question {}", index + 1)
-                                } else {
-                                    question.header
-                                };
-                                shell.waiting(Part::Question {
-                                    request: id,
-                                    index,
-                                    header,
-                                    question: question.question,
-                                    options: question.options,
-                                    multi_select: question.multi_select,
-                                    allow_free_text: question.allow_free_text,
-                                    secret: question.secret,
-                                    selected: Vec::new(),
-                                    resolved: None,
-                                });
-                            }
-                            shell.set_waiting(
-                                &format!("Waiting for your answer · {count} question(s)"),
-                                cx,
-                            );
-                        }
-                        EngineEvent::Finished(Ok(())) => {
-                            shell.finish_run(cx);
-                            return false;
-                        }
-                        EngineEvent::Finished(Err(error)) => {
-                            shell.fail_run(error, cx);
-                            return false;
-                        }
-                    }
-                    true
-                });
-                if !matches!(applied, Ok(true)) {
-                    return;
-                }
-            }
-        })
-        .detach();
-        cx.notify();
-    }
-
-    /// Attach a card (approval, question) to the reply being streamed.
-    pub(crate) fn waiting(&mut self, part: Part) {
-        if let Some(message) = self.reply_mut() {
-            message.push_part(part);
-        }
-    }
-
-    /// The agent is blocked on the person: say so everywhere it shows.
-    pub(crate) fn set_waiting(&mut self, status: &str, cx: &mut Context<Self>) {
-        self.status = Some(status.to_string().into());
-        if let Some(bot) = self.run_bot.and_then(|id| self.workspace.bot_mut(id)) {
-            bot.presence = Presence::Waiting;
-            bot.activity = status.to_string().into();
-        }
-        self.workspace.replace_last_preview();
-        self.scroll.scroll_to_bottom();
-        cx.notify();
-    }
-
-    /// The bot reply being streamed. Last message is not necessarily it: a
-    /// steer appends the user's own line while the answer is still open.
-    fn reply_mut(&mut self) -> Option<&mut Message> {
-        self.workspace
-            .chat_mut()
-            .messages
-            .iter_mut()
-            .rev()
-            .find(|message| message.streaming)
-    }
-
-    fn apply(&mut self, action: Action, cx: &mut Context<Self>) {
-        let bot_id = self.run_bot;
-        match action {
-            Action::Intent(activity) => {
-                self.status = Some(activity.clone().into());
-                if let Some(bot) = bot_id.and_then(|id| self.workspace.bot_mut(id)) {
-                    bot.activity = activity.into();
-                }
-            }
-            Action::Say(text) => {
-                self.saw_assistant_text = true;
-                if let Some(message) = self.reply_mut() {
-                    message.push_text(&text);
-                }
-            }
-            Action::Thought(text) => {
-                if let Some(message) = self.reply_mut() {
-                    message.push_thought(&text);
-                }
-            }
-            Action::Tool {
-                icon,
-                label,
-                activity,
-                detail,
-            } => {
-                self.status = Some(activity.clone().into());
-                if let Some(bot) = bot_id.and_then(|id| self.workspace.bot_mut(id)) {
-                    bot.activity = activity.into();
-                }
-                if let Some(message) = self.reply_mut() {
-                    message.push_part(Part::Tool {
-                        icon,
-                        label,
-                        detail,
-                        done: false,
-                        result: None,
-                    });
-                }
-            }
-            Action::ToolProgress { text, append } => {
-                if let Some(message) = self.reply_mut()
-                    && let Some(Part::Tool { result, .. }) = message
-                        .parts
-                        .iter_mut()
-                        .rev()
-                        .find(|part| matches!(part, Part::Tool { done: false, .. }))
-                {
-                    match result {
-                        Some(slot) if append => slot.push_str(&text),
-                        slot => *slot = Some(text),
-                    }
-                }
-                cx.notify();
-                return;
-            }
-            Action::Phase(phase) => {
-                self.status = Some(phase.into());
-                if let Some(bot) = bot_id.and_then(|id| self.workspace.bot_mut(id)) {
-                    bot.activity = phase.into();
-                }
-                cx.notify();
-                return;
-            }
-            Action::Files {
-                path,
-                added,
-                removed,
-            } => {
-                if let Some(message) = self.reply_mut() {
-                    message.push_part(Part::Files {
-                        path,
-                        added,
-                        removed,
-                        undone: false,
-                    });
-                }
-            }
-            Action::Settle(result) => {
-                if let Some(message) = self.reply_mut() {
-                    message.finish_last_tool(Some(result));
-                }
-            }
-            Action::Error(text) => {
-                if let Some(message) = self.reply_mut() {
-                    message.push_text(&format!("\n\n{text}"));
-                }
-            }
-            Action::Usage {
-                input,
-                output,
-                context_limit,
-            } => {
-                let used = input.saturating_add(output);
-                self.workspace.tokens_used = self.workspace.tokens_used.saturating_add(used);
-                if let Some(limit) = context_limit {
-                    self.workspace.tokens_cap = limit;
-                }
-                if let Some(bot) = bot_id.and_then(|id| self.workspace.bot_mut(id)) {
-                    bot.tokens = bot.tokens.saturating_add(used);
-                    if let Some(limit) = context_limit {
-                        bot.context_limit = Some(limit);
-                    }
-                }
-            }
-            Action::ContextWindow { limit } => {
-                self.workspace.tokens_cap = limit;
-                if let Some(bot) = bot_id.and_then(|id| self.workspace.bot_mut(id)) {
-                    bot.context_limit = Some(limit);
-                }
-            }
-        }
-        self.workspace.replace_last_preview();
-        self.scroll.scroll_to_bottom();
-        cx.notify();
-    }
-
-    fn finish_run(&mut self, cx: &mut Context<Self>) {
-        if let Some(message) = self.reply_mut() {
-            message.streaming = false;
-            message.finish_last_tool(None);
-        }
-        if let Some(bot_id) = self.run_bot
-            && let Some(bot) = self.workspace.bot_mut(bot_id)
-        {
-            bot.presence = Presence::Resting;
-            bot.activity = "Completed".into();
-        }
-        self.run_bot = None;
-        self.run_chat = None;
-        self.free_text_question = None;
-        self.close_cards();
-        self.status = None;
-        self.workspace.replace_last_preview();
-        self.persist_workspace();
-        cx.notify();
-    }
-
-    fn fail_run(&mut self, error: String, cx: &mut Context<Self>) {
-        if let Some(message) = self.reply_mut() {
-            message.streaming = false;
-            if !error.trim().is_empty() {
-                if !message.parts.is_empty() {
-                    message.push_text("\n\n");
-                }
-                message.push_text(&format!("Run failed: {error}"));
-            }
-            message.finish_last_tool(Some("Run failed".into()));
-        }
-        if let Some(bot_id) = self.run_bot.take()
-            && let Some(bot) = self.workspace.bot_mut(bot_id)
-        {
-            bot.presence = Presence::Resting;
-            bot.activity = "Run failed".into();
-        }
-        self.run_chat = None;
-        self.free_text_question = None;
-        self.close_cards();
-        self.status = None;
-        self.workspace.replace_last_preview();
-        self.persist_workspace();
-        cx.notify();
-    }
-
-    /// Stop the run in flight. The answer keeps whatever arrived, marked as
-    /// stopped, so nothing already useful disappears.
-    pub(crate) fn stop_run(&mut self, cx: &mut Context<Self>) {
-        self.generation += 1;
-        if let Some(chat_id) = self.run_chat {
-            self.engine.stop(chat_id);
-        }
-        if let Some(message) = self.reply_mut()
-            && message.streaming
-        {
-            message.streaming = false;
-            message.stopped = true;
-            message.finish_last_tool(Some("Stopped".into()));
-        }
-        if let Some(bot_id) = self.run_bot.take()
-            && let Some(bot) = self.workspace.bot_mut(bot_id)
-        {
-            bot.presence = Presence::Resting;
-            bot.activity = "Stopped on request".into();
-        }
-        self.run_chat = None;
-        self.free_text_question = None;
-        self.close_cards();
-        self.status = None;
-        self.workspace.replace_last_preview();
-        self.persist_workspace();
-        cx.notify();
-    }
-
-    // ---- bot panel actions ----------------------------------------------
-
-    pub(crate) fn cycle_sandbox(&mut self, bot_id: u32, cx: &mut Context<Self>) {
-        if let Some(bot) = self.workspace.bot_mut(bot_id) {
-            bot.sandbox = model::next_sandbox(bot.sandbox);
-        }
-        self.persist_workspace();
-        cx.notify();
-    }
-
-    pub(crate) fn reset_usage(&mut self, bot_id: u32, cx: &mut Context<Self>) {
-        if let Some(bot) = self.workspace.bot_mut(bot_id) {
-            bot.tokens = 0;
-        }
-        self.persist_workspace();
-        cx.notify();
-    }
-
-    /// Take back a file edit or an out-of-chat change, in place.
-    pub(crate) fn undo_part(
-        &mut self,
-        chat_index: usize,
-        message_index: usize,
-        part_index: usize,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(chat) = self.workspace.chats.get_mut(chat_index)
-            && let Some(message) = chat.messages.get_mut(message_index)
-        {
-            match message.parts.get_mut(part_index) {
-                Some(Part::Files { undone, .. }) | Some(Part::Note { undone, .. }) => {
-                    *undone = true;
-                }
-                _ => {}
-            }
-        }
-        cx.notify();
-    }
-
-    // ---- chrome ----------------------------------------------------------
-
-    pub(crate) fn toggle_panel(&mut self, cx: &mut Context<Self>) {
-        self.panel_open = !self.panel_open;
-        self.panel_picker.open = false;
-        cx.notify();
-    }
-
-    pub(crate) fn toggle_appearance(&mut self, cx: &mut Context<Self>) {
-        self.appearance = self.appearance.toggled();
-        Theme::install(self.appearance, cx);
-        cx.notify();
-    }
-
-    // ---- keys ------------------------------------------------------------
-
-    fn shortcuts(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        // A dialog owns the keyboard while it is open.
-        if self.dialog.is_some() {
-            return;
-        }
-        let key = event.keystroke.key.as_str();
-        match key {
-            "j" => self.toggle_appearance(cx),
-            "i" => self.toggle_panel(cx),
-            "n" => self.open_new_bot(window, cx),
-            "f" => {
-                self.searching = true;
-                window.focus(&self.search_focus, cx);
-                cx.notify();
-            }
-            _ => {}
-        }
-    }
-
-    /// The composer's key handler: type, delete, send.
-    pub(crate) fn on_composer_key(
-        &mut self,
-        event: &KeyDownEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let modifiers = event.keystroke.modifiers;
-        self.caret_visible = true;
-        // Ctrl+Enter is the send chord when Enter is a line break.
-        if modifiers.control || modifiers.platform {
-            if event.keystroke.key == "enter" && !self.settings.send_on_enter {
-                self.submit(window, cx);
-            }
-            return;
-        }
-        match event.keystroke.key.as_str() {
-            // Shift+Enter always keeps the line break.
-            "enter" if modifiers.shift => {
-                self.draft.push('\n');
-                cx.notify();
-            }
-            "enter" if self.settings.send_on_enter => self.submit(window, cx),
-            "enter" => {
-                self.draft.push('\n');
-                cx.notify();
-            }
-            "backspace" => {
-                self.draft.pop();
-                cx.notify();
-            }
-            "escape" => {
-                // An open panel picker eats Escape before the draft does.
-                if self.panel_picker.open {
-                    self.panel_picker.open = false;
-                } else {
-                    self.draft.clear();
-                }
-                cx.notify();
-            }
-            key => {
-                let typed = event
-                    .keystroke
-                    .key_char
-                    .clone()
-                    .or_else(|| (key == "space").then(|| " ".to_string()));
-                if let Some(typed) = typed.filter(|text| !text.is_empty()) {
-                    self.draft.push_str(&typed);
-                    cx.notify();
-                }
-            }
-        }
-    }
-
-    /// The sidebar search's key handler.
-    pub(crate) fn on_search_key(
-        &mut self,
-        event: &KeyDownEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let modifiers = event.keystroke.modifiers;
-        if modifiers.control || modifiers.platform {
-            return;
-        }
-        match event.keystroke.key.as_str() {
-            "enter" => {
-                self.searching = false;
-                window.focus(&self.focus, cx);
-                cx.notify();
-            }
-            "escape" => {
-                self.search.clear();
-                self.searching = false;
-                window.focus(&self.focus, cx);
-                cx.notify();
-            }
-            "backspace" => {
-                self.search.pop();
-                cx.notify();
-            }
-            key => {
-                let typed = event
-                    .keystroke
-                    .key_char
-                    .clone()
-                    .or_else(|| (key == "space").then(|| " ".to_string()));
-                if let Some(typed) = typed.filter(|text| !text.is_empty()) {
-                    self.search.push_str(&typed);
-                    cx.notify();
-                }
-            }
-        }
-    }
-
-    /// Shortcuts work from anywhere, including an empty window.
-    fn on_root_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if self.create_menu_open && event.keystroke.key == "escape" {
-            self.create_menu_open = false;
-            cx.notify();
-            return;
-        }
-        if event.keystroke.modifiers.control || event.keystroke.modifiers.platform {
-            self.shortcuts(event, window, cx);
-        }
     }
 }
 
@@ -880,14 +288,17 @@ impl Render for Shell {
         let sidebar = self.view_sidebar(&theme, cx);
         let chat = self.view_chat(&theme, window, cx);
         let create_menu = self.view_create_menu(&theme, cx);
+        let context_menu = self.view_context_menu(&theme, cx);
         let overlay = self.view_overlay(&theme, cx);
+        let panel_popovers = self.view_panel_popovers(&theme, cx);
+        let show_panel = show_right_panel(self.panel_open, f32::from(window.bounds().size.width));
         let main_pane = div()
             .flex_1()
             .min_w_0()
             .mt(px(metrics::SPACE_2))
             .mb(px(metrics::SPACE_2))
             .ml(px(metrics::SPACE_2))
-            .when(!self.panel_open, |this| this.mr(px(metrics::SPACE_2)))
+            .when(!show_panel, |this| this.mr(px(metrics::SPACE_2)))
             .flex()
             .overflow_hidden()
             .rounded(px(metrics::RADIUS_CARD))
@@ -903,7 +314,7 @@ impl Render for Shell {
                     .child(chat),
             );
 
-        let right_panel = self.panel_open.then(|| {
+        let right_panel = show_panel.then(|| {
             div()
                 .w(px(metrics::PANEL_WIDTH))
                 .mt(px(metrics::SPACE_2))
@@ -931,11 +342,13 @@ impl Render for Shell {
             .text_size(px(typo::BODY))
             .text_color(theme.ink)
             .on_key_down(cx.listener(Self::on_root_key))
-            .child(sidebar)
+            .when(!self.sidebar_collapsed, |this| this.child(sidebar))
             .child(main_pane)
             .children(right_panel)
             .children(create_menu)
+            .children(context_menu)
             .children(overlay)
+            .children(panel_popovers)
             .into_any_element()
     }
 }
@@ -943,11 +356,11 @@ impl Render for Shell {
 /// What a permission button says.
 fn permission_label(choice: &PermissionChoice) -> String {
     match choice {
-        PermissionChoice::Allow => "Allow".to_string(),
+        PermissionChoice::Allow => "Allow once".to_string(),
         PermissionChoice::AllowAlways { scope } => match scope {
-            Scope::Chat => "Always in this chat".to_string(),
-            Scope::Repo => "Always in this repo".to_string(),
-            Scope::Pattern(pattern) => format!("Always: {pattern}"),
+            Scope::Chat => "Allow in this conversation".to_string(),
+            Scope::Repo => "Allow in this project".to_string(),
+            Scope::Pattern(pattern) => format!("Always for {pattern}"),
         },
         PermissionChoice::Deny => "Deny".to_string(),
     }
@@ -955,4 +368,20 @@ fn permission_label(choice: &PermissionChoice) -> String {
 
 fn is_deny(choice: &PermissionChoice) -> bool {
     matches!(choice, PermissionChoice::Deny)
+}
+
+#[cfg(test)]
+mod responsive_tests {
+    use super::show_right_panel;
+    use crate::presentation::theme::metrics;
+
+    #[test]
+    fn right_panel_collapses_below_workspace_threshold_without_changing_preference() {
+        assert!(!show_right_panel(true, metrics::PANEL_COLLAPSE_WIDTH - 1.0));
+        assert!(show_right_panel(true, metrics::PANEL_COLLAPSE_WIDTH));
+        assert!(!show_right_panel(
+            false,
+            metrics::PANEL_COLLAPSE_WIDTH + 1.0
+        ));
+    }
 }

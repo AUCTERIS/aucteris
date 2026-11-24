@@ -3,7 +3,7 @@
 
 use gpui::{
     Animation, AnimationExt, AnyElement, App, ClickEvent, FontWeight, Hsla, IntoElement,
-    SharedString, Window, div, img, prelude::*, px, svg,
+    SharedString, Window, div, prelude::*, px, svg,
 };
 use std::time::Duration;
 
@@ -21,7 +21,7 @@ pub fn icon(glyph: &'static str, size: f32, color: Hsla) -> AnyElement {
         .into_any_element()
 }
 
-/// A bot's Grok mascot mark: the original shape mask tinted with the bot's color.
+/// A softly beveled mascot cube. Working bots blink; the cube stays still on hover.
 pub fn mascot(
     shape: MascotShape,
     color: Hsla,
@@ -29,84 +29,95 @@ pub fn mascot(
     size: f32,
     id: usize,
 ) -> AnyElement {
-    let rgb = hsla_to_rgb(color);
-    if presence == Presence::Working {
-        let shape = shape.id_str();
-        let frames = mascot_motion_frames(id);
-        let animations = frames
-            .iter()
-            .map(|(_, milliseconds)| Animation::new(Duration::from_millis(*milliseconds)))
-            .collect();
+    let shape_id = shape.id_str();
+    let shape_path = SharedString::from(format!("icons/mascots/shape-{shape_id}.svg"));
+    let volume_path = SharedString::from(format!("icons/mascots/volume-{shape_id}.svg"));
+    let shade = gpui::hsla(
+        color.h,
+        color.s,
+        (color.l * 0.48).clamp(0.05, 0.36),
+        color.a,
+    );
+    let shadow = svg()
+        .path(shape_path.clone())
+        .absolute()
+        .left_0()
+        .top(px(size * 0.07))
+        .size(px(size))
+        .text_color(shade);
+    let body = svg()
+        .path(shape_path)
+        .absolute()
+        .left_0()
+        .top_0()
+        .size(px(size))
+        .text_color(color);
+    let volume = svg()
+        .path(volume_path)
+        .absolute()
+        .left_0()
+        .top_0()
+        .size(px(size));
+    let (eye_y, eye_x_left, eye_x_right, _) = mascot_eye_geometry(shape);
+    let eye_width = size * 0.145;
+    let eye_height = size * 0.185;
+    let eye_top = eye_y * size / 32.0 - eye_height * 0.5;
+    let eye = |left: f32| {
         div()
-            .flex_shrink_0()
-            .size(px(size))
-            .with_animations(("grok-mascot", id), animations, move |element, index, _| {
-                let frame = frames[index].0;
-                let path = format!(
-                    "mascots/animated/{shape}-{:02x}{:02x}{:02x}-{frame}.png",
-                    rgb[0], rgb[1], rgb[2]
-                );
-                element.child(img(SharedString::from(path)).size(px(size)).flex_shrink_0())
-            })
-            .into_any_element()
+            .absolute()
+            .left(px(left * size / 32.0 - eye_width * 0.5))
+            .top(px(eye_top))
+            .w(px(eye_width))
+            .h(px(eye_height))
+            .rounded(px(size * 0.07))
+            .bg(gpui::hsla(0.0, 0.0, 1.0, 1.0))
+    };
+    let eyes = div()
+        .absolute()
+        .inset_0()
+        .child(eye(eye_x_left))
+        .child(eye(eye_x_right));
+    let eyes: AnyElement = if presence == Presence::Working {
+        // A short eyelid close at the end of a slow, per-bot cycle.
+        let period = 3_200 + (id as u64 % 5) * 180;
+        eyes.with_animation(
+            ("mascot-eye-blink", id),
+            Animation::new(Duration::from_millis(period))
+                .repeat()
+                .with_easing(|progress| match progress {
+                    p if (0.92..0.94).contains(&p) => 0.45,
+                    p if (0.94..0.965).contains(&p) => 0.02,
+                    p if (0.965..0.985).contains(&p) => 0.45,
+                    _ => 1.0,
+                }),
+            |element, opacity| element.opacity(opacity),
+        )
+        .into_any_element()
     } else {
-        img(SharedString::from(format!(
-            "mascots/tint/{}-{:02x}{:02x}{:02x}.png",
-            shape.id_str(),
-            rgb[0],
-            rgb[1],
-            rgb[2]
-        )))
+        eyes.into_any_element()
+    };
+    div()
+        .relative()
         .flex_shrink_0()
         .size(px(size))
+        .child(shadow)
+        .child(body)
+        .child(volume)
+        .child(eyes)
         .into_any_element()
+}
+
+fn mascot_eye_geometry(shape: MascotShape) -> (f32, f32, f32, f32) {
+    match shape {
+        MascotShape::Circle
+        | MascotShape::Diamond
+        | MascotShape::Hexagon
+        | MascotShape::Octagon
+        | MascotShape::Square => (16.0, 12.2, 19.8, 2.8),
+        MascotShape::Pentagon => (17.5, 12.2, 19.8, 2.8),
+        MascotShape::Star => (17.0, 12.9, 19.1, 2.2),
+        MascotShape::Triangle => (20.0, 12.2, 19.8, 2.8),
     }
-}
-
-fn hsla_to_rgb(color: Hsla) -> [u8; 3] {
-    let hue = color.h.rem_euclid(1.0) * 6.0;
-    let chroma = (1.0 - (2.0 * color.l - 1.0).abs()) * color.s;
-    let x = chroma * (1.0 - (hue.rem_euclid(2.0) - 1.0).abs());
-    let (r, g, b) = match hue as u8 {
-        0 => (chroma, x, 0.0),
-        1 => (x, chroma, 0.0),
-        2 => (0.0, chroma, x),
-        3 => (0.0, x, chroma),
-        4 => (x, 0.0, chroma),
-        _ => (chroma, 0.0, x),
-    };
-    let m = color.l - chroma / 2.0;
-    [r, g, b].map(|channel| ((channel + m).clamp(0.0, 1.0) * 255.0).round() as u8)
-}
-
-/// The Grok face strip has 29 poses: a long rest, a short blink, and three
-/// possible small glances. Frame holds match Grok's transition timings.
-fn mascot_motion_frames(id: usize) -> Vec<(u32, u64)> {
-    let rest = 2_600 + (id as u64 % 5) * 170;
-    let mut frames = vec![(0, rest)];
-    frames.extend([
-        (1, 18),
-        (2, 18),
-        (3, 18),
-        (4, 35),
-        (5, 75),
-        (6, 75),
-        (7, 75),
-        (0, 50),
-    ]);
-    let glance = 8 + ((id / 7) % 3) as u32 * 7;
-    frames.push((0, rest));
-    frames.extend([
-        (glance, 45),
-        (glance + 1, 45),
-        (glance + 2, 45),
-        (glance + 3, 700 + (id as u64 % 5) * 40),
-        (glance + 4, 45),
-        (glance + 5, 45),
-        (glance + 6, 45),
-        (0, 50),
-    ]);
-    frames
 }
 
 /// A room's mark: a small team glyph colored by its first member.
@@ -143,8 +154,8 @@ pub fn presence_dot(presence: Presence, theme: &Theme, size: f32) -> AnyElement 
 pub fn chip(label: impl Into<SharedString>, theme: &Theme) -> AnyElement {
     div()
         .flex_shrink_0()
-        .h(px(20.0))
-        .px(px(8.0))
+        .h(px(metrics::CONTROL_XS))
+        .px(px(metrics::SPACE_2))
         .flex()
         .items_center()
         .rounded_full()
@@ -165,11 +176,11 @@ pub fn chip_with_icon(
 ) -> AnyElement {
     div()
         .flex_shrink_0()
-        .h(px(20.0))
-        .px(px(8.0))
+        .h(px(metrics::CONTROL_XS))
+        .px(px(metrics::SPACE_2))
         .flex()
         .items_center()
-        .gap(px(5.0))
+        .gap(px(metrics::PX_5))
         .rounded_full()
         .border_1()
         .border_color(theme.hairline)
@@ -184,6 +195,7 @@ pub fn chip_with_icon(
 pub fn icon_button<F>(
     id: (&'static str, usize),
     glyph: &'static str,
+    label: impl Into<SharedString>,
     theme: &Theme,
     on_click: F,
 ) -> AnyElement
@@ -194,8 +206,15 @@ where
     let color = theme.ink_secondary;
     div()
         .id(id)
+        .role(gpui::Role::Button)
+        .aria_label(label)
+        .tab_index(0)
+        .focus_visible({
+            let focus = theme.focus;
+            move |style| style.border_1().border_color(focus)
+        })
         .flex_shrink_0()
-        .size(px(26.0))
+        .size(px(metrics::ICON_BUTTON))
         .flex()
         .items_center()
         .justify_center()
@@ -220,11 +239,18 @@ where
     F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
     let hover = theme.hover_wash();
+    let label = label.into();
+    let focus = theme.focus;
     div()
         .id(id)
+        .role(gpui::Role::Button)
+        .aria_label(label.clone())
+        .aria_selected(selected)
+        .tab_index(0)
+        .focus_visible(move |style| style.border_1().border_color(focus))
         .flex_shrink_0()
-        .h(px(26.0))
-        .px(px(10.0))
+        .h(px(metrics::CONTROL_XS))
+        .px(px(metrics::PX_10))
         .flex()
         .items_center()
         .rounded_full()
@@ -245,12 +271,18 @@ where
             theme.ink_secondary
         })
         .on_click(on_click)
-        .child(label.into())
+        .child(label)
         .into_any_element()
 }
 
 /// A two-state switch. The track carries the state; nothing animates.
-pub fn switch<F>(id: (&'static str, usize), on: bool, theme: &Theme, on_click: F) -> AnyElement
+pub fn switch<F>(
+    id: (&'static str, usize),
+    on: bool,
+    label: impl Into<SharedString>,
+    theme: &Theme,
+    on_click: F,
+) -> AnyElement
 where
     F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
@@ -264,12 +296,22 @@ where
     } else {
         theme.ink_secondary
     };
+    let focus = theme.focus;
     div()
         .id(id)
+        .role(gpui::Role::CheckBox)
+        .aria_label(label)
+        .aria_toggled(if on {
+            gpui::Toggled::True
+        } else {
+            gpui::Toggled::False
+        })
+        .tab_index(0)
+        .focus_visible(move |style| style.border_1().border_color(focus))
         .flex_shrink_0()
-        .w(px(34.0))
-        .h(px(20.0))
-        .p(px(2.0))
+        .w(px(metrics::SWITCH_WIDTH))
+        .h(px(metrics::SWITCH_HEIGHT))
+        .p(px(metrics::PX_2))
         .flex()
         .items_center()
         .when(on, |this| this.justify_end())
@@ -277,7 +319,7 @@ where
         .bg(track)
         .cursor_pointer()
         .on_click(on_click)
-        .child(div().size(px(16.0)).rounded_full().bg(knob))
+        .child(div().size(px(metrics::SPACE_4)).rounded_full().bg(knob))
         .into_any_element()
 }
 
@@ -285,11 +327,11 @@ where
 pub fn keycap(label: impl Into<SharedString>, theme: &Theme) -> AnyElement {
     div()
         .flex_shrink_0()
-        .h(px(20.0))
-        .px(px(6.0))
+        .h(px(metrics::CONTROL_MD))
+        .px(px(metrics::PX_6))
         .flex()
         .items_center()
-        .rounded(px(5.0))
+        .rounded(px(metrics::PX_5))
         .bg(theme.ink.opacity(0.05))
         .border_1()
         .border_color(theme.hairline)
@@ -313,7 +355,7 @@ pub fn section_label(label: impl Into<SharedString>, theme: &Theme) -> AnyElemen
 /// A 1px vertical rule between panes.
 pub fn edge(color: Hsla) -> AnyElement {
     div()
-        .w(px(1.0))
+        .w(px(metrics::PX_1))
         .h_full()
         .flex_shrink_0()
         .bg(color)
@@ -325,13 +367,13 @@ pub fn meter(fraction: f32, theme: &Theme) -> AnyElement {
     let fraction = fraction.clamp(0.0, 1.0);
     let track = theme.ink.opacity(if theme.is_dark() { 0.08 } else { 0.07 });
     div()
-        .h(px(4.0))
+        .h(px(metrics::SPACE_1))
         .w_full()
         .rounded_full()
         .bg(track)
         .child(
             div()
-                .h(px(4.0))
+                .h(px(metrics::SPACE_1))
                 .rounded_full()
                 .bg(theme.ink_secondary.opacity(0.85))
                 .w(gpui::relative(fraction)),
@@ -347,5 +389,21 @@ pub fn compact_count(value: u64) -> String {
         format!("{}k", value / 1_000)
     } else {
         value.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compact_count;
+
+    #[test]
+    fn compact_count_scales_units() {
+        assert_eq!(compact_count(0), "0");
+        assert_eq!(compact_count(999), "999");
+        assert_eq!(compact_count(1_000), "1k");
+        assert_eq!(compact_count(12_400), "12k");
+        assert_eq!(compact_count(999_999), "999k");
+        assert_eq!(compact_count(1_000_000), "1.0M");
+        assert_eq!(compact_count(2_500_000), "2.5M");
     }
 }

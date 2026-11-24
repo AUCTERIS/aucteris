@@ -2,6 +2,7 @@
 //! window, so state stays in one place and a click never travels through an
 //! event bus.
 
+pub mod action;
 pub mod bot_panel;
 pub mod chat;
 pub mod composer;

@@ -4,8 +4,10 @@
 //! that look interactive are interactive — each one changes something and the
 //! change is visible immediately.
 
+use aucteris_harness::komet_proto::SandboxLevel;
 use gpui::{
-    AnyElement, Context, FontWeight, IntoElement, ParentElement, Styled, div, prelude::*, px,
+    AnyElement, ClickEvent, Context, FontWeight, IntoElement, ParentElement, Styled, div,
+    prelude::*, px,
 };
 
 use crate::presentation::theme::{Theme, metrics, text as typo};
@@ -14,6 +16,179 @@ use crate::presentation::ui::shell::Shell;
 use crate::presentation::ui::widgets::{self, compact_count};
 
 impl Shell {
+    /// Popovers render at the shell root so the panel's scroll viewport cannot
+    /// clip the model list or the permissions menu.
+    pub(crate) fn view_panel_popovers(
+        &self,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let selected_bot_id = self.workspace.selected_bot();
+        let current_bot = selected_bot_id.and_then(|id| self.workspace.bot(id));
+        let provider_popup = if self.panel_picker.open {
+            current_bot.and_then(|bot| {
+                self.panel_picker_position.map(|position| {
+                    // Keep the menu in the conversation column, to the left
+                    // of the details panel, and align it around its trigger.
+                    let top = (position.y - px(metrics::PX_130)).max(px(metrics::SPACE_2));
+                    div()
+                        .absolute()
+                        .right(px(metrics::PANEL_WIDTH + metrics::SPACE_4))
+                        .top(top)
+                        .w(px(metrics::PANEL_WIDTH))
+                        .child(self.provider_picker_view(
+                            theme,
+                            cx,
+                            &self.panel_picker,
+                            &bot.runtime,
+                            PickerHost::Panel,
+                        ))
+                        .into_any_element()
+                })
+            })
+        } else {
+            None
+        };
+
+        let permissions_popup = if self.permissions_open {
+            current_bot.and_then(|bot| {
+                let bot_id = bot.id;
+                self.permissions_position.map(|position| {
+                    let levels = [
+                        (
+                            SandboxLevel::ReadOnly,
+                            "Read only",
+                            "Can inspect files without changing them.",
+                        ),
+                        (
+                            SandboxLevel::WorkspaceWrite,
+                            "Workspace write",
+                            "Can edit the private workspace and approved folders. Other writes need your approval.",
+                        ),
+                        (
+                            SandboxLevel::DangerFullAccess,
+                            "Full access",
+                            "Can access files and tools without sandbox limits.",
+                        ),
+                    ];
+                    let mut options: Vec<AnyElement> = Vec::new();
+                    for (level, label, detail) in levels {
+                        let selected = bot.sandbox == level;
+                        options.push(
+                            div()
+                                .id(format!("permission-{label}"))
+                                .px(px(metrics::SPACE_2))
+                                .py(px(metrics::SPACE_1))
+                                .flex()
+                                .items_center()
+                                .gap(px(metrics::SPACE_2))
+                                .rounded(px(metrics::RADIUS_MENU_ROW))
+                                .cursor_pointer()
+                                .hover(|style| style.bg(theme.raised_hover))
+                                .on_click(cx.listener(move |this, _event, _window, cx| {
+                                    this.dispatch(
+                                        crate::presentation::ui::action::UiAction::SetBotSandbox {
+                                            bot: bot_id,
+                                            sandbox: level,
+                                        },
+                                        cx,
+                                    );
+                                }))
+                                .child(widgets::icon(
+                                    if selected { "check" } else { "panel" },
+                                    14.0,
+                                    if selected {
+                                        theme.accent
+                                    } else {
+                                        theme.ink_tertiary
+                                    },
+                                ))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(metrics::PX_2))
+                                        .child(
+                                            div()
+                                                .text_size(px(typo::META))
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(theme.ink)
+                                                .child(label),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_size(px(typo::TINY))
+                                                .text_color(theme.ink_tertiary)
+                                                .child(detail),
+                                        ),
+                                )
+                                .into_any_element(),
+                        );
+                    }
+
+                    let top = (position.y - px(metrics::PX_111)).max(px(metrics::SPACE_2));
+                    div()
+                        .absolute()
+                        .right(px(metrics::PANEL_WIDTH + metrics::SPACE_4))
+                        .top(top)
+                        .w(px(metrics::PANEL_WIDTH))
+                        .p(px(metrics::SPACE_2))
+                        .flex()
+                        .flex_col()
+                        .gap(px(metrics::SPACE_1))
+                        .rounded(px(metrics::RADIUS_CONTROL))
+                        .bg(theme.menu)
+                        .border_1()
+                        .border_color(theme.edge)
+                        .shadow_md()
+                        .child(
+                            div()
+                                .px(px(metrics::SPACE_2))
+                                .pb(px(metrics::SPACE_1))
+                                .text_size(px(typo::META))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(theme.ink_secondary)
+                                .child("Permission level"),
+                        )
+                        .children(options)
+                        .into_any_element()
+                })
+            })
+        } else {
+            None
+        };
+
+        if provider_popup.is_none() && permissions_popup.is_none() {
+            return None;
+        }
+
+        Some(
+            div()
+                .id("panel-popovers")
+                .absolute()
+                .inset_0()
+                .occlude()
+                .child(
+                    div()
+                        .id("panel-popover-dismiss")
+                        .absolute()
+                        .inset_0()
+                        .on_click(cx.listener(|this, _event, window, cx| {
+                            this.panel_picker.open = false;
+                            this.panel_picker_position = None;
+                            this.permissions_open = false;
+                            this.permissions_position = None;
+                            window.focus(&this.focus.clone(), cx);
+                            cx.notify();
+                        })),
+                )
+                .children(provider_popup)
+                .children(permissions_popup)
+                .into_any_element(),
+        )
+    }
+
     pub(crate) fn view_bot_panel(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let chat = self.workspace.chat().clone();
         let Some(bot_id) = chat.bot else {
@@ -37,14 +212,18 @@ impl Shell {
             .child(widgets::icon_button(
                 ("edit-bot", 0),
                 "edit",
+                "Edit bot",
                 theme,
                 cx.listener(move |this, _event, window, cx| this.open_edit_bot(bot_id, window, cx)),
             ))
             .child(widgets::icon_button(
                 ("close-panel", 0),
                 "x",
+                "Close bot panel",
                 theme,
-                cx.listener(|this, _event, _window, cx| this.toggle_panel(cx)),
+                cx.listener(|this, _event, _window, cx| {
+                    this.dispatch(crate::presentation::ui::action::UiAction::TogglePanel, cx)
+                }),
             ));
 
         let identity = div()
@@ -55,7 +234,7 @@ impl Shell {
                 bot.mascot,
                 color,
                 bot.presence,
-                40.0,
+                metrics::MASCOT_PANEL,
                 bot.id as usize * 1000 + 5,
             ))
             .child(
@@ -64,7 +243,7 @@ impl Shell {
                     .overflow_hidden()
                     .flex()
                     .flex_col()
-                    .gap(px(2.0))
+                    .gap(px(metrics::PX_2))
                     .child(
                         div()
                             .truncate()
@@ -90,11 +269,11 @@ impl Shell {
         let runtime_chip = div()
             .id("panel-runtime-chip")
             .h(px(metrics::CONTROL_LG))
-            .px(px(10.0))
+            .px(px(metrics::PX_10))
             .flex()
             .items_center()
             .justify_between()
-            .gap(px(8.0))
+            .gap(px(metrics::SPACE_2))
             .rounded(px(metrics::RADIUS_CONTROL))
             .bg(theme.inset)
             .border_1()
@@ -105,11 +284,14 @@ impl Shell {
             })
             .cursor_pointer()
             .hover(move |style| style.bg(chip_hover))
-            .on_click(cx.listener(|this, _event, window, cx| {
+            .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
                 this.panel_picker.open = !this.panel_picker.open;
                 if this.panel_picker.open {
+                    this.panel_picker_position = Some(event.position());
+                    this.permissions_open = false;
                     window.focus(&this.panel_picker_focus.clone(), cx);
                 } else {
+                    this.panel_picker_position = None;
                     window.focus(&this.focus.clone(), cx);
                 }
                 cx.notify();
@@ -118,7 +300,7 @@ impl Shell {
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(8.0))
+                    .gap(px(metrics::SPACE_2))
                     .min_w_0()
                     .child(widgets::icon(runtime_icon, 16.0, theme.ink))
                     .child(
@@ -137,16 +319,6 @@ impl Shell {
             ))
             .into_any_element();
 
-        let picker_popup = picker_open.then(|| {
-            self.provider_picker_view(
-                theme,
-                cx,
-                &self.panel_picker,
-                &bot.runtime,
-                PickerHost::Panel,
-            )
-        });
-
         let folder_row = div()
             .flex()
             .items_center()
@@ -156,7 +328,7 @@ impl Shell {
                 div()
                     .text_size(px(typo::BODY))
                     .text_color(theme.ink_secondary)
-                    .child("Folder"),
+                    .child("Private workspace"),
             )
             .child(
                 div()
@@ -169,14 +341,110 @@ impl Shell {
                     .child(bot.folder.to_string()),
             );
 
-        let sandbox_row = self.panel_row(
+        let can_add_folders =
+            crate::application::engine::Engine::supports_scoped_folders(&bot.runtime)
+                && bot.sandbox == SandboxLevel::WorkspaceWrite;
+        let allowed_folders = bot.allowed_folders.clone();
+        let bot_id = bot.id;
+        let mut allowed_rows: Vec<AnyElement> = Vec::new();
+        for (index, folder) in allowed_folders.iter().enumerate() {
+            allowed_rows.push(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(metrics::SPACE_2))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .font_family(theme.font_mono.clone())
+                            .text_size(px(typo::TINY))
+                            .text_color(theme.ink_secondary)
+                            .child(folder.clone()),
+                    )
+                    .child(widgets::icon_button(
+                        ("remove-allowed-folder", bot_id as usize * 1000 + index),
+                        "x",
+                        "Remove folder permission",
+                        theme,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.dispatch(
+                                crate::presentation::ui::action::UiAction::RemoveAllowedFolder {
+                                    bot: bot_id,
+                                    index,
+                                },
+                                cx,
+                            )
+                        }),
+                    ))
+                    .into_any_element(),
+            );
+        }
+        let add_folder_button = div()
+            .id("add-allowed-folder")
+            .h(px(metrics::CONTROL_MD))
+            .px(px(metrics::PX_10))
+            .flex()
+            .items_center()
+            .gap(px(metrics::PX_6))
+            .rounded(px(metrics::RADIUS_CONTROL))
+            .bg(theme.inset)
+            .cursor_pointer()
+            .text_size(px(typo::META))
+            .text_color(theme.ink_secondary)
+            .when(can_add_folders, |this| {
+                this.hover(|style| style.bg(theme.hover_wash()))
+            })
+            .when(can_add_folders, |this| {
+                this.on_click(cx.listener(move |this, _event, window, cx| {
+                    this.add_allowed_folder(bot_id, window, cx)
+                }))
+            })
+            .child(widgets::icon("plus", 13.0, theme.ink_secondary))
+            .child("Add folder");
+        let allowed_section = div()
+            .flex()
+            .flex_col()
+            .gap(px(metrics::SPACE_1))
+            .child(widgets::section_label("Allowed folders", theme))
+            .children(allowed_rows)
+            .when(allowed_folders.is_empty(), |this| {
+                this.child(
+                    div()
+                        .text_size(px(typo::TINY))
+                        .text_color(theme.ink_tertiary)
+                        .child(if can_add_folders {
+                            "No additional folders"
+                        } else if crate::application::engine::Engine::supports_scoped_folders(
+                            &bot.runtime,
+                        ) {
+                            "Set permission level to Workspace write to add folders"
+                        } else {
+                            "This runtime does not support persistent folder access"
+                        }),
+                )
+            })
+            .when(can_add_folders, |this| this.child(add_folder_button));
+
+        let permissions_row = self.panel_row(
             theme,
             cx,
-            "sandbox-row",
-            "Sandbox",
+            "permissions-row",
+            "Permissions",
             crate::domain::model::sandbox_label(bot.sandbox).to_string(),
             true,
-            move |this, cx| this.cycle_sandbox(bot_id, cx),
+            move |this, event, cx| {
+                this.permissions_open = !this.permissions_open;
+                if this.permissions_open {
+                    this.permissions_position = Some(event.position());
+                    this.panel_picker.open = false;
+                    this.panel_picker_position = None;
+                } else {
+                    this.permissions_position = None;
+                }
+                cx.notify();
+            },
         );
 
         let instructions = div()
@@ -212,7 +480,7 @@ impl Shell {
                     .child(
                         div()
                             .id("reset-usage")
-                            .h(px(20.0))
+                            .h(px(metrics::CONTROL_MD))
                             .px(px(metrics::SPACE_2))
                             .flex()
                             .items_center()
@@ -222,7 +490,10 @@ impl Shell {
                             .text_size(px(typo::TINY))
                             .text_color(theme.ink_tertiary)
                             .on_click(cx.listener(move |this, _event, _window, cx| {
-                                this.reset_usage(bot_id, cx)
+                                this.dispatch(
+                                    crate::presentation::ui::action::UiAction::ResetUsage(bot_id),
+                                    cx,
+                                )
                             }))
                             .child("Reset"),
                     ),
@@ -250,28 +521,28 @@ impl Shell {
                     .child(identity)
                     .child(
                         div()
+                            .relative()
                             .flex()
                             .flex_col()
                             .gap(px(metrics::SPACE_1))
-                            .child(widgets::section_label("Agent CLI", theme))
-                            .child(runtime_chip)
-                            .when_some(picker_popup, |this, popup| this.child(popup)),
+                            .child(widgets::section_label("Provider", theme))
+                            .child(runtime_chip),
                     )
                     .child(
                         div()
                             .flex()
                             .flex_col()
                             .gap(px(metrics::SPACE_1))
-                            .child(widgets::section_label("Working folder", theme))
+                            .child(widgets::section_label("Private workspace", theme))
                             .child(folder_row),
                     )
+                    .child(allowed_section)
                     .child(
                         div()
                             .flex()
                             .flex_col()
                             .gap(px(metrics::SPACE_1))
-                            .child(widgets::section_label("Sandbox", theme))
-                            .child(sandbox_row),
+                            .child(permissions_row),
                     )
                     .child(
                         div()
@@ -312,7 +583,7 @@ impl Shell {
             let color = theme.identity(bot.color);
             members.push(
                 div()
-                    .h(px(40.0))
+                    .h(px(metrics::PX_40))
                     .flex()
                     .items_center()
                     .gap(px(metrics::SPACE_2))
@@ -335,9 +606,16 @@ impl Shell {
                     .child(widgets::icon_button(
                         ("remove-room-member", bot.id as usize),
                         "x",
+                        format!("Remove {} from team", bot.name),
                         theme,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.remove_bot_from_room(room_id, bot_id, cx)
+                            this.dispatch(
+                                crate::presentation::ui::action::UiAction::RemoveBotFromRoom {
+                                    room: room_id,
+                                    bot: bot_id,
+                                },
+                                cx,
+                            )
                         }),
                     ))
                     .into_any_element(),
@@ -354,7 +632,7 @@ impl Shell {
             let bot_id = bot.id;
             available_bots.push(
                 div()
-                    .h(px(36.0))
+                    .h(px(metrics::PX_36))
                     .flex()
                     .items_center()
                     .gap(px(metrics::SPACE_2))
@@ -376,9 +654,16 @@ impl Shell {
                     .child(widgets::icon_button(
                         ("add-room-member", bot_id as usize),
                         "plus",
+                        format!("Add {} to team", bot.name),
                         theme,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.add_bot_to_room(room_id, bot_id, cx)
+                            this.dispatch(
+                                crate::presentation::ui::action::UiAction::AddBotToRoom {
+                                    room: room_id,
+                                    bot: bot_id,
+                                },
+                                cx,
+                            )
                         }),
                     ))
                     .into_any_element(),
@@ -396,8 +681,11 @@ impl Shell {
             .child(widgets::icon_button(
                 ("close-panel", 1),
                 "x",
+                "Close bot panel",
                 theme,
-                cx.listener(|this, _event, _window, cx| this.toggle_panel(cx)),
+                cx.listener(|this, _event, _window, cx| {
+                    this.dispatch(crate::presentation::ui::action::UiAction::TogglePanel, cx)
+                }),
             ));
 
         div()
@@ -469,7 +757,7 @@ impl Shell {
         on_click: F,
     ) -> AnyElement
     where
-        F: Fn(&mut Shell, &mut Context<Shell>) + 'static,
+        F: Fn(&mut Shell, &ClickEvent, &mut Context<Shell>) + 'static,
     {
         let hover = theme.hover_wash();
         div()
@@ -484,7 +772,9 @@ impl Shell {
             .when(interactive, |this| {
                 this.cursor_pointer()
                     .hover(move |style| style.bg(hover))
-                    .on_click(cx.listener(move |this, _event, _window, cx| on_click(this, cx)))
+                    .on_click(
+                        cx.listener(move |this, event, _window, cx| on_click(this, event, cx)),
+                    )
             })
             .child(
                 div()
@@ -499,7 +789,7 @@ impl Shell {
                     .gap(px(metrics::SPACE_1))
                     .child(
                         div()
-                            .max_w(px(190.0))
+                            .max_w(px(metrics::PX_190))
                             .truncate()
                             .text_size(px(typo::META))
                             .text_color(theme.ink)
